@@ -1,3 +1,26 @@
+## 1.4.0-rc1 / 2017-09-15
+
+* [FEATURE] Add fuzzy search [#317]
+* [FEATURE] Allow restricting charset of generated passwords [#270]
+* [FEATURE] Check quality of newly inserted passwords with crunchy [#276]
+* [FEATURE] JSON API [#326]
+* [FEATURE] Per-Mount configuration options [#330]
+* [FEATURE] Terminal selection of results [#259]
+* [FEATURE] gopass sync [#303]
+* [ENHANCEMENT] Build with Go 1.9 [#294]
+* [ENHANCEMENT] Display single find result directly [#265]
+* [ENHANCEMENT] Global --yes flag [#327]
+* [ENHANCEMENT] Improve error handling and propagation [#280]
+* [ENHANCEMENT] Omit newline when not writing to a terminal [#325]
+* [ENHANCEMENT] Only commit once per recipient batch operation [#329]
+* [ENHANCEMENT] Provide partial support for .gpg-id files in subfolders [#291]
+* [ENHANCEMENT] Trim any trailing newlines or carriage returns in show output [#296]
+* [ENHANCEMENT] Use contexts [#310]
+* [ENHANCEMENT] Use default editors [#286]
+* [BUGFIX] Confirm removal of directories [#309]
+* [BUGFIX] Only confirm recipients once during batch operations [#328]
+* [BUGFIX] Only overwrite password on insert [#323]
+
 ## 1.3.2 / 2017-08-22
 
 * [BUGFIX] Fix git version output [#274]
