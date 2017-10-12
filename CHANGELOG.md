@@ -1,4 +1,4 @@
-## 1.5.0-alpha.0 / 2017-10-12
+## 1.5.0-alpha.1 / 2017-10-12
 
 * [FEATURE] Add secret creation wizard [#386]
 * [FEATURE] Add onboarding wizard [#387]
