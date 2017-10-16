@@ -1,4 +1,4 @@
-## 1.5.0-alpha.3 / 2017-10-12
+## 1.5.0-rc1 / 2017-10-12
 
 * [FEATURE] Add secret creation wizard [#386]
 * [FEATURE] Add onboarding wizard [#387]
@@ -12,6 +12,7 @@
 * [ENHANCEMENT] Improve responsiveness by context usage [#388]
 * [ENHANCEMENT] Improve output readability [#392] [#393]
 * [ENHANCEMENT] Automatic GPG key generation [#391]
+* [BUGFIX] Relax YAML document marker handling [#398]
 
 ## 1.4.1 / 2017-10-05
 
