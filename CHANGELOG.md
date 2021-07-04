@@ -1,3 +1,20 @@
+## 1.12.7 / 2021-07-02
+
+* DOCUMENTATION Fixed Single Line Formating for Clone Documentation (#1943)
+* [BUGFIX] Allow --strict to be chained with --symbols (#1952, #1941)
+* [BUGFIX] Normalize recipient IDs before comparison (#1953, #1900)
+* [BUGFIX] Use /tmp for GIT_SSH_COMMAND on Mac (#1951, #1896)
+* [ENHANCEMENT] Add warning when parsing content (#1950)
+
+## 1.12.6 / 2021-05-01
+
+* [BUGFIX] Do not recurse with a key (#1907, #1906)
+* [BUGFIX] Fix SSH control path (#1899, #1896)
+* [BUGFIX] Fix gopass env with subtrees (#1894, #1893)
+* [BUGFIX] Honor create -s flag (#1891)
+* [BUGFIX] Ignore commented values in gpg config (#1901, #1898)
+* [ENHANCEMENT] Add better usage instructions (#1912)
+
 ## 1.12.5 / 2021-03-27
 
 * [BUGFIX] Allow subkeys (#1843, #1841, #1842)
