@@ -1,36 +1,38 @@
 package action
 
 import (
-	"fmt"
-	"runtime"
+	"context"
 
+	"github.com/gopasspw/gopass/internal/action/exit"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/internal/updater"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
-
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
-// Update will start the interactive update assistant
-func (s *Action) Update(c *cli.Context) error {
-	s.rem.Reset("update")
+// Update will start the interactive update assistant.
+func (s *miscHandler) Update(ctx context.Context, cmd *cli.Command) error {
+	_ = s.rem.Reset("update")
 
-	ctx := ctxutil.WithGlobalFlags(c)
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
 
 	if s.version.String() == "0.0.0+HEAD" {
-		out.Errorf(ctx, "Can not check version against HEAD")
+		out.Errorf(ctx, "Cannot check version against HEAD")
+
 		return nil
 	}
 
-	if runtime.GOOS == "windows" {
-		return fmt.Errorf("gopass update is not supported on windows (#1722)")
+	if cmd.Bool("pre") {
+		out.Printf(ctx, "⚒ Checking for available updates (including pre-releases) ...")
+	} else {
+		out.Printf(ctx, "⚒ Checking for available updates ...")
 	}
 
-	out.Printf(ctx, "⚒ Checking for available updates ...")
-	if err := updater.Update(ctx, s.version); err != nil {
-		return ExitError(ExitUnknown, err, "Failed to update gopass: %s", err)
+	if err := updater.Update(ctx, s.version, cmd.Bool("pre")); err != nil {
+		return exit.Error(exit.Unknown, err, "Failed to update gopass: %s", err)
 	}
 
 	out.OKf(ctx, "gopass is up to date")
+
 	return nil
 }

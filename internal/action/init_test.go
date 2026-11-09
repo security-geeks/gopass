@@ -10,27 +10,27 @@ import (
 
 	"github.com/gopasspw/gopass/internal/backend"
 	"github.com/gopasspw/gopass/internal/backend/crypto/plain"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/tests/gptest"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestInit(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithInteractive(ctx, false)
 	ctx = backend.WithCryptoBackend(ctx, backend.Plain)
 	ctx = backend.WithStorageBackend(ctx, backend.FS)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
 	buf := &bytes.Buffer{}
 	out.Stdout = buf
@@ -41,15 +41,17 @@ func TestInit(t *testing.T) {
 	}()
 
 	c := gptest.CliCtx(ctx, t, "foo.bar@example.org")
-	assert.NoError(t, act.IsInitialized(c))
-	assert.Error(t, act.Init(c))
-	assert.NoError(t, act.Setup(c))
+	_, errIsInit := act.IsInitialized(ctx, c)
+
+	require.NoError(t, errIsInit)
+	require.Error(t, act.Init(ctx, c))
+	require.NoError(t, act.Setup(ctx, c))
 
 	crypto := act.Store.Crypto(ctx, "")
 	require.NotNil(t, crypto)
 	assert.Equal(t, "plain", crypto.Name())
 	assert.True(t, act.initHasUseablePrivateKeys(ctx, crypto))
-	assert.Error(t, act.initGenerateIdentity(ctx, crypto, "foo bar", "foo.bar@example.org"))
+	require.Error(t, act.initGenerateIdentity(ctx, crypto, "foo bar", "foo.bar@example.org"))
 	buf.Reset()
 
 	act.printRecipients(ctx, "")
@@ -57,8 +59,10 @@ func TestInit(t *testing.T) {
 	buf.Reset()
 
 	// un-initialize the store
-	assert.NoError(t, os.Remove(filepath.Join(u.StoreDir(""), plain.IDFile)))
-	assert.Error(t, act.IsInitialized(c))
+	require.NoError(t, os.Remove(filepath.Join(u.StoreDir(""), plain.IDFile)))
+	_, errIsInit = act.IsInitialized(ctx, c)
+
+	require.Error(t, errIsInit)
 	buf.Reset()
 }
 
@@ -83,6 +87,7 @@ func TestInitParseContext(t *testing.T) {
 				if be := backend.GetCryptoBackend(ctx); be != backend.Age {
 					return fmt.Errorf("wrong backend: %d", be)
 				}
+
 				return nil
 			},
 		},
@@ -92,14 +97,16 @@ func TestInitParseContext(t *testing.T) {
 				if backend.GetStorageBackend(ctx) != backend.GitFS {
 					return fmt.Errorf("wrong backend")
 				}
+
 				return nil
 			},
 		},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			c := gptest.CliCtxWithFlags(context.Background(), t, tc.flags)
-			assert.NoError(t, tc.check(initParseContext(c.Context, c)), tc.name)
+			c := gptest.CliCtxWithFlags(config.NewContextInMemory(), t, tc.flags)
+			ctx, err := initParseContext(config.NewContextInMemory(), c)
+			require.NoError(t, err)
+			require.NoError(t, tc.check(ctx), tc.name)
 			buf.Reset()
 		})
 	}

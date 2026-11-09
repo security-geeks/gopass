@@ -12,37 +12,48 @@ import (
 )
 
 // addRel adds the required number of relative elements to go from dst back to
-// src
+// src.
 func addRel(src, dst string) string {
-	for i := 0; i < strings.Count(dst, "/"); i++ {
+	for range strings.Count(dst, "/") {
 		src = "../" + src
 	}
+
 	return src
 }
 
-// longestCommonPrefix finds the longest common prefix directory
+// longestCommonPrefix finds the longest common prefix directory.
 func longestCommonPrefix(l, r string) string {
 	var prefix string
 	for i := 0; i < len(l) && i < len(r); i++ {
 		if l[i] != r[i] {
 			prefix = l[:i]
+
 			break
 		}
 	}
+
 	if !strings.Contains(prefix, "/") {
 		return prefix
 	}
+
 	return prefix[:strings.LastIndex(prefix, "/")]
 }
 
-// Link creates a symlink
+// Link creates a symlink, i.e. an alias to reach the same secret
+// through different names.
 func (s *Store) Link(ctx context.Context, from, to string) error {
 	if runtime.GOOS == "windows" {
 		from = filepath.FromSlash(from)
 		to = filepath.FromSlash(to)
 	}
-	fromPath := filepath.Join(s.path, from)
-	toPath := filepath.Join(s.path, to)
+	fromPath, err := s.safePath(from)
+	if err != nil {
+		return err
+	}
+	toPath, err := s.safePath(to)
+	if err != nil {
+		return err
+	}
 	prefix := longestCommonPrefix(fromPath, toPath)
 
 	fromRel := strings.TrimPrefix(fromPath, prefix+string(filepath.Separator))
@@ -50,14 +61,15 @@ func (s *Store) Link(ctx context.Context, from, to string) error {
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("can not get current working directory: %w", err)
+		return fmt.Errorf("cannot get current working directory: %w", err)
 	}
+
 	defer func() {
-		os.Chdir(cwd)
+		_ = os.Chdir(cwd)
 	}()
 
 	toDir := filepath.Dir(toPath)
-	if err := os.MkdirAll(toDir, 0700); err != nil {
+	if err := os.MkdirAll(toDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create destination dir %q: %w", toDir, err)
 	}
 
@@ -69,5 +81,6 @@ func (s *Store) Link(ctx context.Context, from, to string) error {
 
 	debug.Log("path: %q\n\tfromPath:\t%q\n\ttoPath:\t\t%q\n\tprefix:\t\t%q\n\tfromRel:\t%q\n\ttoRel:\t\t%q\n\ttoDir:\t\t%q\n\tlinkDst:\t%q",
 		s.path, fromPath, toPath, prefix, fromRel, toRel, toDir, linkDst)
+
 	return os.Symlink(linkDst, filepath.Base(toRel))
 }

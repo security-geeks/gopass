@@ -64,3 +64,139 @@ secrets by checking out old revisions from the repository.
 
 Please note that we try to make it hard to lock yourself out from your secrets.
 To ensure that a user is always able to decrypt his own secrets, gopass requires that the user has at least one private key available (that matches the current public keys on file for the password store).
+
+---
+
+## Security Engineering Highlights
+
+The following design decisions and implementation choices contribute positively
+to the security posture of gopass. They are documented here both as a record for
+maintainers and as guidance for contributors who must preserve these properties.
+
+### Binary Hardening
+
+gopass is built with Position-Independent Executable (PIE) support, stripped
+debug symbols, `-trimpath`, `CGO_ENABLED=0`, and the `netgo` build tag. This
+eliminates CGo dependencies (and with them an entire class of memory-safety
+issues) and makes cross-compilation straightforward.
+
+### No Shell Injection
+
+Every external command invocation — GPG, Git, and editors — uses
+`exec.Command` with a string-slice argument list rather than constructing a
+shell command string. This categorically prevents shell-injection attacks even
+when user-supplied input reaches command arguments.
+
+### Signed Update Verification
+
+The built-in updater downloads a checksum file, verifies its GPG signature
+against a hardcoded project public key, and enforces TLS 1.3 as a minimum
+protocol version. An attacker would need both a fraudulent TLS certificate
+**and** the project signing key to serve a malicious update.
+
+### Age Agent Socket Security
+
+Before connecting to the age-plugin agent socket, gopass checks that the
+socket file has `0o600` permissions and that its owning UID matches the current
+process UID. This prevents a local attacker from substituting a malicious
+socket.
+
+### Clipboard Auto-Clear
+
+The clipboard helper spawns a detached `unclip` process that sleeps for a
+configurable interval and then clears the clipboard. Before clearing, it
+re-reads the clipboard and verifies an Argon2id checksum of the expected value
+to ensure it only erases secrets it placed there (not content from an
+unrelated application the user copied in the meantime).
+
+### Debug Log Secret Protection
+
+All types that hold secret material implement the `SafeStr()` interface, which
+returns `"(elided)"` rather than the secret value. The `out` package respects
+this interface everywhere. Full secret values are written to the debug log
+**only** when `GOPASS_DEBUG_LOG_SECRETS=1` is explicitly set in the
+environment.
+
+### Temporary File Security
+
+Temporary files created for editor sessions use `/dev/shm` on Linux, a private
+ramdisk on macOS, and `0o600` permissions on all platforms. The files are
+deleted in a deferred cleanup step so that even abnormal process exits
+minimise the window during which plaintext is on disk.
+
+### Recipient Validation
+
+Before encrypting to a GPG key, gopass validates that the key is usable: it
+checks for expiration, minimum trust level, and the presence of an encryption
+sub-capability. Expired or untrusted keys are rejected, preventing silent
+encryption to keys that can no longer decrypt.
+
+### Recipient File Integrity (Hash Pinning)
+
+The recipients file (`.gpg-id`) lives inside the git repository and lists the
+public-key fingerprints/IDs that secrets are encrypted to. Because the file is
+git-tracked, a collaborator — or an attacker with write access to the remote
+repository — could push a commit that silently adds their own key, causing
+future encrypt operations to include them as a recipient.
+
+gopass defends against this with a hash-pinning mechanism:
+
+1. **Hash computation.** Every time gopass writes the recipients file (via
+   `gopass recipients add`, `gopass recipients rm`, or `gopass init`), it
+   computes the SHA-256 digest of the serialised recipients list.
+
+2. **Local storage.** The digest is written to the **global** (machine-local)
+   gopass config file, stored outside the git repository, under the key
+   `recipients.hash` (or `recipients.<alias>.hash` for mounted sub-stores).
+   Because the global config file is never committed to git, a remote attacker
+   cannot alter the expected value.
+
+3. **Verification on load.** When `recipients.check` is set to `true` (in the
+   global config or per-mount config), every load of the recipients file
+   recomputes the digest and compares it to the stored value.  If they differ,
+   `ErrInvalidHash` is returned and the operation is aborted, alerting the
+   operator that the recipients file was modified outside of gopass.
+
+4. **Explicit acknowledgement.** A legitimate change — for example, pulling an
+   update that a teammate pushed after running `gopass recipients add` on their
+   machine — can be accepted with `gopass recipients ack`.  This command
+   verifies the new recipient list interactively and then updates the stored
+   hash, re-pinning to the new value.
+
+The combination of out-of-band hash storage and explicit acknowledgement ensures
+that the recipients list can only grow silently if the attacker also has
+write access to the operator's local machine — at which point the entire
+threat model has already collapsed.
+
+### OpenBSD Pledge
+
+On OpenBSD, gopass calls `protect.Pledge("stdio rpath wpath cpath tty proc
+exec fattr")` to restrict the set of permitted syscalls to only those
+actually needed. This limits the blast radius of any exploitation attempt
+on that platform.
+
+### Age Keyring Protection
+
+`age.keyring-identities` and `age.keyring-recipients` are security-sensitive,
+machine-local configuration. The bootstrap identity file must be trusted and
+kept independent of the encrypted keyring. Plugin identities may invoke a
+corresponding age plugin executable; its installation and executable search
+path must also be trusted. Recipient review does not approve or validate plugin
+executables, bootstrap files or their contents.
+
+Adding an attacker-controlled keyring recipient does not unlock existing
+ciphertext. However, a subsequent identity update or re-encryption could encrypt
+the software identities to that recipient. Verifying that the replacement can
+be decrypted prevents accidental lockout, not unauthorized additional access.
+For this reason, recipient-protected writes require manual review of a new or
+changed recipient set. Approval is bound to the current ciphertext in a local
+record, so missing or stale records require review again.
+
+This confirmation offers defense in depth and protection against mistakes under
+the existing trusted-local-machine assumption. It does not defend against an
+attacker who can rewrite the approval record or replace gopass and its plugins.
+Same-user local processes can use an unlocked agent. Hardware authentication
+protects opening the keyring; the software identities are available to the agent
+in memory during the unlocked session. Locking releases the references and
+invalidates pending authentication, without guaranteeing immediate zeroization
+of all private-key copies managed by the Go runtime.

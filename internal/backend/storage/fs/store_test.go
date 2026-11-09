@@ -1,23 +1,25 @@
 package fs
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetAndGet(t *testing.T) {
+	t.Parallel()
+
 	initialContent := []byte(`initial file content`)
 	otherContent := []byte(`other file content`)
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
-	path, cleanup := newTempDir(t)
-	defer cleanup()
+	path := t.TempDir()
 
-	s := &Store{path}
+	s := &Store{path: path}
 
 	fileHasContent := func(filename string, content []byte) {
 		written, _ := s.Get(ctx, filename)
@@ -42,8 +44,66 @@ func TestSetAndGet(t *testing.T) {
 	fileHasContent(filepath.Join("a", "other"), initialContent)
 }
 
+func TestListBrokenSymlink(t *testing.T) {
+	t.Parallel()
+
+	storeRoot := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(storeRoot, "valid"), []byte("secret"), 0o600))
+	require.NoError(t, os.Symlink(filepath.Join(storeRoot, "missing"), filepath.Join(storeRoot, "broken")))
+
+	files, err := New(storeRoot).List(config.NewContextInMemory(), "")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"broken", "valid"}, files)
+}
+
+func TestMove(t *testing.T) {
+	t.Parallel()
+
+	initialContent := []byte(`initial file content`)
+	otherContent := []byte(`other file content`)
+	ctx := config.NewContextInMemory()
+
+	path := t.TempDir()
+
+	s := &Store{path: path}
+
+	fileHasContent := func(filename string, content []byte) {
+		written, _ := s.Get(ctx, filename)
+		assert.Equalf(t, content, written, "content of file")
+	}
+
+	filename := "src"
+
+	// when file does not exist
+	fileHasContent(filename, nil)
+
+	// when the folder does not exist
+	_ = s.Set(ctx, filename, initialContent)
+	fileHasContent(filename, initialContent)
+
+	// move file
+	require.NoError(t, s.Move(ctx, filename, "dst1", true))
+	fileHasContent("dst1", initialContent)
+
+	// overwrite file
+	_ = s.Set(ctx, "dst2", otherContent)
+	fileHasContent("dst2", otherContent)
+
+	// move file
+	require.NoError(t, s.Move(ctx, "dst1", "dst2", true))
+	fileHasContent("dst1", nil)
+	fileHasContent("dst2", initialContent)
+
+	// copy file
+	require.NoError(t, s.Move(ctx, "dst2", "dst3", false))
+	fileHasContent("dst2", initialContent)
+	fileHasContent("dst3", initialContent)
+}
+
 func TestRemoveEmptyParentDirectories(t *testing.T) {
-	var tests = []struct {
+	t.Parallel()
+
+	tests := []struct {
 		name          string
 		storeRoot     []string
 		subdirs       []string
@@ -90,13 +150,14 @@ func TestRemoveEmptyParentDirectories(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			td, cleanup := newTempDir(t)
-			defer cleanup()
+			t.Parallel()
+
+			td := t.TempDir()
 
 			path := filepath.Join(append([]string{td}, test.storeRoot...)...)
 			subdir := filepath.Join(append([]string{path}, test.subdirs...)...)
 
-			if err := os.MkdirAll(subdir, 0777); err != nil {
+			if err := os.MkdirAll(subdir, 0o777); err != nil {
 				t.Error(err)
 			}
 
@@ -105,7 +166,7 @@ func TestRemoveEmptyParentDirectories(t *testing.T) {
 			}
 
 			s := &Store{
-				path,
+				path: path,
 			}
 			if err := s.removeEmptyParentDirectories(filepath.Join(subdir, "deletedFile")); err != nil {
 				t.Error(err)
@@ -127,7 +188,9 @@ func TestRemoveEmptyParentDirectories(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	var tests = []struct {
+	t.Parallel()
+
+	tests := []struct {
 		name      string
 		location  []string
 		toDelete  []string
@@ -169,11 +232,12 @@ func TestDelete(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			path, cleanup := newTempDir(t)
-			defer cleanup()
+			t.Parallel()
+
+			path := t.TempDir()
 
 			subdir := filepath.Join(append([]string{path}, test.location...)...)
-			if err := os.MkdirAll(subdir, 0777); err != nil {
+			if err := os.MkdirAll(subdir, 0o777); err != nil {
 				t.Error(err)
 			}
 
@@ -185,9 +249,9 @@ func TestDelete(t *testing.T) {
 			}
 
 			store := &Store{
-				path,
+				path: path,
 			}
-			err := store.Delete(context.Background(), filepath.Join(test.toDelete...))
+			err := store.Delete(config.NewContextInMemory(), filepath.Join(test.toDelete...))
 
 			if test.shouldErr {
 				if err == nil {
@@ -205,13 +269,206 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func newTempDir(t *testing.T) (string, func()) {
-	t.Helper()
-	td, err := os.MkdirTemp("", "gopass-")
-	if err != nil {
-		t.Error(err)
+func TestPruneAndIsDirRejectPathTraversal(t *testing.T) {
+	ctx := config.NewContextInMemory()
+
+	base := t.TempDir()
+	storeRoot := filepath.Join(base, "store")
+	outside := filepath.Join(base, "outside")
+	require.NoError(t, os.MkdirAll(storeRoot, 0o700))
+	require.NoError(t, os.MkdirAll(outside, 0o700))
+
+	canary := filepath.Join(outside, "canary.txt")
+	require.NoError(t, os.WriteFile(canary, []byte("do not delete me"), 0o600))
+
+	s := &Store{path: storeRoot}
+
+	t.Run("Prune", func(t *testing.T) {
+		err := s.Prune(ctx, "../outside")
+		require.Error(t, err, "Prune should reject a prefix that escapes the store root")
+
+		_, statErr := os.Stat(canary)
+		require.NoError(t, statErr, "canary file outside the store root must survive")
+	})
+
+	t.Run("IsDir", func(t *testing.T) {
+		assert.False(t, s.IsDir(ctx, "../outside"), "IsDir should not resolve a name that escapes the store root")
+	})
+}
+
+// TestSymlinkEscapeRejected verifies that a symlink inside the store pointing
+// outside the store root cannot be used to read, write, move or delete files
+// outside the store. See GHSA-v4c2-4fvx-chr3.
+func TestSymlinkEscapeRejected(t *testing.T) {
+	ctx := config.NewContextInMemory()
+
+	base := t.TempDir()
+	storeRoot := filepath.Join(base, "store")
+	outside := filepath.Join(base, "outside")
+	require.NoError(t, os.MkdirAll(storeRoot, 0o700))
+	require.NoError(t, os.MkdirAll(outside, 0o700))
+
+	canary := filepath.Join(outside, "canary.txt")
+	require.NoError(t, os.WriteFile(canary, []byte("do not touch me"), 0o600))
+
+	// A directory symlink inside the store that points outside the root.
+	require.NoError(t, os.Symlink(outside, filepath.Join(storeRoot, "escape")))
+	// A file symlink inside the store that points outside the root.
+	require.NoError(t, os.Symlink(canary, filepath.Join(storeRoot, "escape-file")))
+
+	s := New(storeRoot)
+
+	assertCanaryIntact := func(t *testing.T) {
+		t.Helper()
+
+		content, err := os.ReadFile(canary)
+		require.NoError(t, err, "canary file outside the store root must survive")
+		assert.Equal(t, "do not touch me", string(content), "canary file must not be modified")
 	}
-	return td, func() {
-		_ = os.RemoveAll(td)
+
+	t.Run("Get", func(t *testing.T) {
+		_, err := s.Get(ctx, "escape/canary.txt")
+		require.Error(t, err, "Get must reject a symlinked path escaping the store root")
+
+		_, err = s.Get(ctx, "escape-file")
+		require.Error(t, err, "Get must reject a symlinked file escaping the store root")
+	})
+
+	t.Run("Set", func(t *testing.T) {
+		err := s.Set(ctx, "escape/new.txt", []byte("pwned"))
+		require.Error(t, err, "Set must reject a symlinked path escaping the store root")
+
+		_, statErr := os.Stat(filepath.Join(outside, "new.txt"))
+		assert.True(t, os.IsNotExist(statErr), "Set must not create files outside the store root")
+
+		err = s.Set(ctx, "escape-file", []byte("pwned"))
+		require.Error(t, err, "Set must reject a symlinked file escaping the store root")
+		assertCanaryIntact(t)
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		err := s.Delete(ctx, "escape/canary.txt")
+		require.Error(t, err, "Delete must reject a symlinked path escaping the store root")
+		assertCanaryIntact(t)
+
+		err = s.Delete(ctx, "escape-file")
+		require.Error(t, err, "Delete must reject a symlinked file escaping the store root")
+		assertCanaryIntact(t)
+	})
+
+	t.Run("Prune", func(t *testing.T) {
+		err := s.Prune(ctx, "escape")
+		require.Error(t, err, "Prune must reject a symlinked path escaping the store root")
+		assertCanaryIntact(t)
+	})
+
+	t.Run("Move", func(t *testing.T) {
+		err := s.Move(ctx, "escape/canary.txt", "moved.txt", true)
+		require.Error(t, err, "Move must reject a symlinked source escaping the store root")
+		assertCanaryIntact(t)
+
+		err = s.Move(ctx, "moved.txt", "escape/moved.txt", true)
+		require.Error(t, err, "Move must reject a symlinked destination escaping the store root")
+		assertCanaryIntact(t)
+	})
+
+	t.Run("Exists", func(t *testing.T) {
+		assert.False(t, s.Exists(ctx, "escape/canary.txt"), "Exists must not resolve a symlinked path escaping the store root")
+	})
+
+	t.Run("IsDir", func(t *testing.T) {
+		assert.False(t, s.IsDir(ctx, "escape"), "IsDir must not resolve a symlinked path escaping the store root")
+	})
+
+	t.Run("Link", func(t *testing.T) {
+		err := s.Link(ctx, "escape/canary.txt", "link.txt")
+		require.Error(t, err, "Link must reject a symlinked source escaping the store root")
+	})
+
+	t.Run("LinkTarget", func(t *testing.T) {
+		_, _, err := s.LinkTarget(ctx, "escape-file")
+		require.Error(t, err, "LinkTarget must reject a symlinked file escaping the store root")
+	})
+}
+
+// TestSetDoesNotWriteThroughSymlink verifies that Set replaces a symlink with a
+// regular file instead of writing through it. A remote tree could otherwise
+// plant a symlink (e.g. evil -> .git/config) and then a regular file at the same
+// path, writing into the git metadata directory.
+func TestSetDoesNotWriteThroughSymlink(t *testing.T) {
+	ctx := config.NewContextInMemory()
+
+	storeRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(storeRoot, ".git"), 0o700))
+	configFile := filepath.Join(storeRoot, ".git", "config")
+	require.NoError(t, os.WriteFile(configFile, []byte("original"), 0o600))
+
+	// evil -> .git/config (a symlink that stays inside the store root).
+	require.NoError(t, os.Symlink(filepath.Join(".git", "config"), filepath.Join(storeRoot, "evil")))
+
+	s := New(storeRoot)
+
+	require.NoError(t, s.Set(ctx, "evil", []byte("pwned")))
+
+	// The link must have been replaced by a regular file.
+	fi, err := os.Lstat(filepath.Join(storeRoot, "evil"))
+	require.NoError(t, err)
+	assert.Zero(t, fi.Mode()&os.ModeSymlink, "evil must no longer be a symlink")
+
+	// .git/config must be untouched.
+	content, err := os.ReadFile(configFile)
+	require.NoError(t, err)
+	assert.Equal(t, "original", string(content), ".git/config must not be written through the symlink")
+}
+
+// TestSetRejectsSymlinkedLeadingPath verifies that Set refuses to write through
+// a symlinked directory component (e.g. evil -> .git, then evil/config).
+func TestSetRejectsSymlinkedLeadingPath(t *testing.T) {
+	ctx := config.NewContextInMemory()
+
+	storeRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(storeRoot, ".git"), 0o700))
+
+	// evil -> .git (a directory symlink inside the store root).
+	require.NoError(t, os.Symlink(".git", filepath.Join(storeRoot, "evil")))
+
+	s := New(storeRoot)
+
+	err := s.Set(ctx, "evil/config", []byte("pwned"))
+	require.Error(t, err, "Set must refuse to write through a symlinked directory component")
+
+	_, statErr := os.Stat(filepath.Join(storeRoot, ".git", "config"))
+	assert.True(t, os.IsNotExist(statErr), ".git/config must not be created")
+}
+
+// TestSetSymlinkTargetValidation verifies that SetSymlink only accepts relative
+// targets that stay inside the store root and outside .git.
+func TestSetSymlinkTargetValidation(t *testing.T) {
+	ctx := config.NewContextInMemory()
+
+	storeRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(storeRoot, ".git"), 0o700))
+
+	s := New(storeRoot)
+
+	// A relative target inside the store is fine.
+	require.NoError(t, s.SetSymlink(ctx, "alias", "target.gpg"))
+
+	// Absolute targets are rejected.
+	require.Error(t, s.SetSymlink(ctx, "abs", "/etc/passwd"))
+	// Targets escaping the store root are rejected.
+	require.Error(t, s.SetSymlink(ctx, "escape", "../../etc/passwd"))
+	// Targets pointing into .git are rejected.
+	require.Error(t, s.SetSymlink(ctx, "gitlink", ".git/config"))
+}
+
+// TestRejectVCSDirAliases verifies that the VCS metadata guard covers .git
+// (including the Windows aliases and nested components) and .jj.
+func TestRejectVCSDirAliases(t *testing.T) {
+	for _, name := range []string{".git", ".GIT", ".git/config", "a/.git/config", ".git.", ".git ", "GIT~1", ".git::$INDEX_ALLOCATION", ".jj", ".JJ", ".jj/repo", "a/.jj/working_copy"} {
+		require.Error(t, rejectVCSDir(name), name)
+	}
+	for _, name := range []string{"git", ".gitignore", "a/git/config", "secrets/.gpg-id", ".jjignore"} {
+		assert.NoError(t, rejectVCSDir(name), name)
 	}
 }

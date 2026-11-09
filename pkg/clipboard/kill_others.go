@@ -1,4 +1,4 @@
-// +build !darwin,!linux,!solaris,!windows,!freebsd
+//go:build !darwin && !linux && !solaris && !windows && !freebsd
 
 package clipboard
 

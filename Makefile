@@ -11,15 +11,15 @@ ZSH_COMPLETION_OUTPUT     := zsh.completion
 CLIPHELPERS               ?= ""
 # Support reproducible builds by embedding date according to SOURCE_DATE_EPOCH if present
 DATE                      := $(shell date -u -d "@$(SOURCE_DATE_EPOCH)" '+%FT%T%z' 2>/dev/null || date -u '+%FT%T%z')
-BUILDFLAGS_NOPIE          := -trimpath -ldflags="-s -w -X main.version=$(GOPASS_VERSION) -X main.commit=$(GOPASS_REVISION) -X main.date=$(DATE) $(CLIPHELPERS)" -gcflags="-trimpath=$(GOPATH)" -asmflags="-trimpath=$(GOPATH)"
+BUILDFLAGS_NOPIE          := -buildvcs=true -tags=netgo -trimpath -ldflags="-s -w -X main.version=$(GOPASS_VERSION) -X main.commit=$(GOPASS_REVISION) -X main.date=$(DATE) $(CLIPHELPERS)" -gcflags="-trimpath=$(GOPATH)" -asmflags="-trimpath=$(GOPATH)"
 BUILDFLAGS                ?= $(BUILDFLAGS_NOPIE) -buildmode=pie
 TESTFLAGS                 ?=
 PWD                       := $(shell pwd)
 PREFIX                    ?= $(GOPATH)
 BINDIR                    ?= $(PREFIX)/bin
-GO                        := GO111MODULE=on go
-GOOS                      ?= $(shell go version | cut -d' ' -f4 | cut -d'/' -f1)
-GOARCH                    ?= $(shell go version | cut -d' ' -f4 | cut -d'/' -f2)
+GO                        ?= GO111MODULE=on CGO_ENABLED=0 go
+GOOS                      ?= $(shell $(GO) version | cut -d' ' -f4 | cut -d'/' -f1)
+GOARCH                    ?= $(shell $(GO) version | cut -d' ' -f4 | cut -d'/' -f2)
 TAGS                      ?= netgo
 export GO111MODULE=on
 
@@ -28,9 +28,9 @@ OK := $(shell tput setaf 6; echo ' [OK]'; tput sgr0;)
 all: sysinfo build
 build: $(GOPASS_OUTPUT)
 completion: $(BASH_COMPLETION_OUTPUT) $(FISH_COMPLETION_OUTPUT) $(ZSH_COMPLETION_OUTPUT)
-travis: sysinfo crosscompile build fulltest codequality completion
-travis-osx: sysinfo build test completion
-travis-windows: sysinfo build test-win completion
+gha-linux: sysinfo licensecheck crosscompile build fulltest completion
+gha-osx: sysinfo build test completion
+gha-windows: sysinfo build test-win completion
 
 sysinfo:
 	@echo ">> SYSTEM INFORMATION"
@@ -38,7 +38,7 @@ sysinfo:
 	@printf '%s\n' '$(OK)'
 	@echo -n "     PWD:       : $(shell pwd)"
 	@printf '%s\n' '$(OK)'
-	@echo -n "     GO         : $(shell go version)"
+	@echo -n "     GO         : $(shell $(GO) version)"
 	@printf '%s\n' '$(OK)'
 	@echo -n "     BUILDFLAGS : $(BUILDFLAGS)"
 	@printf '%s\n' '$(OK)'
@@ -51,6 +51,7 @@ sysinfo:
 
 clean:
 	@echo -n ">> CLEAN"
+	@rm -rf vendor/
 	@$(GO) clean -i ./...
 	@rm -f ./coverage-all.html
 	@rm -f ./coverage-all.out
@@ -80,9 +81,9 @@ install: all install-completion install-man
 
 install-completion:
 	@install -d $(DESTDIR)$(PREFIX)/share/zsh/site-functions $(DESTDIR)$(PREFIX)/share/bash-completion/completions $(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d
-	@install -m 0755 $(ZSH_COMPLETION_OUTPUT) $(DESTDIR)$(PREFIX)/share/zsh/site-functions/_gopass
-	@install -m 0755 $(BASH_COMPLETION_OUTPUT) $(DESTDIR)$(PREFIX)/share/bash-completion/completions/gopass
-	@install -m 0755 $(FISH_COMPLETION_OUTPUT) $(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/gopass.fish
+	@install -m 0644 $(ZSH_COMPLETION_OUTPUT) $(DESTDIR)$(PREFIX)/share/zsh/site-functions/_gopass
+	@install -m 0644 $(BASH_COMPLETION_OUTPUT) $(DESTDIR)$(PREFIX)/share/bash-completion/completions/gopass
+	@install -m 0644 $(FISH_COMPLETION_OUTPUT) $(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/gopass.fish
 	@printf '%s\n' '$(OK)'
 
 install-man: gopass.1
@@ -94,9 +95,13 @@ fulltest: $(GOPASS_OUTPUT)
 	@echo "mode: atomic" > coverage-all.out
 	@$(foreach pkg, $(PKGS),\
 	    echo -n "     ";\
-		go test -run '(Test|Example)' $(BUILDFLAGS) $(TESTFLAGS) -coverprofile=coverage.out -covermode=atomic $(pkg) || exit 1;\
+		$(GO) test -run '(Test|Example)' $(BUILDFLAGS) $(TESTFLAGS) -coverprofile=coverage.out -covermode=atomic $(pkg) || exit 1;\
 		tail -n +2 coverage.out >> coverage-all.out;)
 	@$(GO) tool cover -html=coverage-all.out -o coverage-all.html
+	@which go-cover-treemap > /dev/null; if [ $$? -ne 0 ]; then \
+		$(GO) install github.com/nikolaydubina/go-cover-treemap@latest; \
+	fi
+	@go-cover-treemap -coverprofile coverage-all.out > coverage-all.svg
 
 test: $(GOPASS_OUTPUT)
 	@echo ">> TEST, \"fast-mode\": race detector off"
@@ -110,103 +115,80 @@ test-win: $(GOPASS_OUTPUT)
 		$(GO) test -test.short -run '(Test|Example)' $(pkg) || exit 1;)
 
 test-integration: $(GOPASS_OUTPUT)
-	cd tests && GOPASS_BINARY=$(PWD)/$(GOPASS_OUTPUT) GOPASS_TEST_DIR=$(PWD)/tests go test -v
+	cd tests && GOPASS_BINARY=$(PWD)/$(GOPASS_OUTPUT) GOPASS_TEST_DIR=$(PWD)/tests $(GO) test -v $(TESTFLAGS)
 
 crosscompile:
-	@echo -n ">> CROSSCOMPILE linux/amd64"
-	@GOOS=linux GOARCH=amd64 $(GO) build -o $(GOPASS_OUTPUT)-linux-amd64
-	@printf '%s\n' '$(OK)'
-	@echo -n ">> CROSSCOMPILE darwin/amd64"
-	@GOOS=darwin GOARCH=amd64 $(GO) build -o $(GOPASS_OUTPUT)-darwin-amd64
-	@printf '%s\n' '$(OK)'
-	@echo -n ">> CROSSCOMPILE windows/amd64"
-	@GOOS=windows GOARCH=amd64 $(GO) build -o $(GOPASS_OUTPUT)-windows-amd64
-	@printf '%s\n' '$(OK)'
+	@echo ">> CROSSCOMPILE"
+	@which goreleaser > /dev/null; if [ $$? -ne 0 ]; then \
+		$(GO) install github.com/goreleaser/goreleaser/v2@v2.11.2; \
+	fi
+	@goreleaser build --snapshot
 
 %.completion: $(GOPASS_OUTPUT)
 	@printf ">> $* completion, output = $@"
 	@./gopass completion $* > $@
 	@printf "%s\n" "$(OK)"
 
-codequality:
+codequality: licensecheck
 	@echo ">> CODE QUALITY"
 
-	@echo -n "     REVIVE    "
-	@which revive > /dev/null; if [ $$? -ne 0 ]; then \
-		$(GO) get -u github.com/mgechev/revive; \
+	@echo -n "     GOLANGCI-LINT "
+	@which golangci-lint > /dev/null; if [ $$? -ne 0 ]; then \
+		$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1; \
 	fi
-	@revive -formatter friendly -exclude vendor/... ./...
+	@golangci-lint run --max-issues-per-linter 0 --max-same-issues 0 || exit 1
 	@printf '%s\n' '$(OK)'
 
-	@echo -n "     FMT       "
-	@$(foreach gofile, $(GOFILES_NOVENDOR),\
-			out=$$(gofmt -s -l -d -e $(gofile) | tee /dev/stderr); if [ -n "$$out" ]; then exit 1; fi;)
-	@printf '%s\n' '$(OK)'
-
-	@echo -n "     VET       "
-	@$(GO) vet ./...
-	@printf '%s\n' '$(OK)'
-
-	@echo -n "     CYCLO     "
-	@which gocyclo > /dev/null; if [ $$? -ne 0 ]; then \
-		$(GO) get -u github.com/fzipp/gocyclo/cmd/gocyclo; \
+	@echo -n "     KEEP-SORTED   "
+	@which keep-sorted > /dev/null; if [ $$? -ne 0 ]; then \
+		$(GO) install github.com/google/keep-sorted@latest; \
 	fi
-	@$(foreach gofile, $(GOFILES_NOVENDOR),\
-			gocyclo -over 22 $(gofile) || exit 1;)
+	@keep-sorted --mode lint $(GOFILES_NOVENDOR) || exit 1
 	@printf '%s\n' '$(OK)'
 
-	@echo -n "     LINT      "
-	@which golint > /dev/null; if [ $$? -ne 0 ]; then \
-		$(GO) get -u golang.org/x/lint/golint; \
+	@echo -n "     GOVULNCHECK   "
+	@which govulncheck > /dev/null; if [ $$? -ne 0 ]; then \
+		$(GO) install golang.org/x/vuln/cmd/govulncheck@latest; \
 	fi
-	@$(foreach pkg, $(PKGS),\
-			golint -set_exit_status $(pkg) || exit 1;)
+	@govulncheck >/dev/null || exit 1
 	@printf '%s\n' '$(OK)'
 
-	@echo -n "     INEFF     "
-	@which ineffassign > /dev/null; if [ $$? -ne 0 ]; then \
-		$(GO) get -u github.com/gordonklaus/ineffassign; \
-	fi
-	@ineffassign . || exit 1
-	@printf '%s\n' '$(OK)'
+licensecheck:
+	@echo ">> LICENSE CHECK"
 
-	@echo -n "     SPELL     "
-	@which misspell > /dev/null; if [ $$? -ne 0 ]; then \
-		$(GO) get -u github.com/client9/misspell/cmd/misspell; \
+	@echo -n "     LICENSE-LINT  "
+	@which license-lint > /dev/null; if [ $$? -ne 0 ]; then \
+		$(GO) install istio.io/tools/cmd/license-lint@latest; \
 	fi
-	@$(foreach gofile, $(GOFILES_NOVENDOR),\
-			misspell --error $(gofile) || exit 1;)
-	@printf '%s\n' '$(OK)'
+	@license-lint --config .license-lint.yml >/dev/null || exit 1
 
-	@echo -n "     STATICCHECK "
-	@which staticcheck > /dev/null; if [ $$? -ne 0  ]; then \
-		$(GO) get -u honnef.co/go/tools/cmd/staticcheck; \
-	fi
-	@staticcheck $(PKGS) || exit 1
-	@printf '%s\n' '$(OK)'
-
-	@echo -n "     UNPARAM "
-	@which unparam > /dev/null; if [ $$? -ne 0 ]; then \
-		$(GO) get -u mvdan.cc/unparam; \
-	fi
-	@unparam -exported=false $(PKGS)
 	@printf '%s\n' '$(OK)'
 
 gen:
-	@go generate ./...
+	@$(GO) generate ./...
 
 fmt:
-	@gofmt -s -l -w $(GOFILES_NOVENDOR)
-	@goimports -l -w $(GOFILES_NOVENDOR)
-	@go mod tidy
+	@keep-sorted --mode fix $(GOFILES_NOVENDOR)
+	@gofumpt -w $(GOFILES_NOVENDOR)
+	@$(GO) mod tidy
 
 deps:
-	@go build -v ./...
+	@$(GO) build -v ./...
 
 upgrade: gen fmt
-	@go get -u ./...
+	@$(GO) get -u ./...
+	@$(GO) mod tidy
+
+fix:
+	@$(GO) fix ./...
 
 man:
-	@go run helpers/man/main.go > gopass.1
+	@$(GO) run helpers/man/main.go > gopass.1
 
-.PHONY: clean build completion install sysinfo crosscompile test codequality release goreleaser debsign man
+msi:
+	@$(GO) run helpers/msipkg/main.go
+
+docker:
+	docker build -t gopass:latest .
+
+.PHONY: clean build completion install sysinfo crosscompile test codequality release goreleaser debsign man msi docker

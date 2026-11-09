@@ -5,15 +5,19 @@ import (
 
 	"github.com/gopasspw/gopass/tests/gptest"
 	"github.com/stretchr/testify/assert"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func testCommand(t *testing.T, cmd *cli.Command) {
-	if len(cmd.Subcommands) < 1 {
+	t.Helper()
+
+	if len(cmd.Commands) < 1 {
 		assert.NotNil(t, cmd.Action, cmd.Name)
 	}
+
 	assert.NotEmpty(t, cmd.Usage)
 	assert.NotEmpty(t, cmd.Description)
+
 	for _, flag := range cmd.Flags {
 		switch v := flag.(type) {
 		case *cli.StringFlag:
@@ -24,14 +28,16 @@ func testCommand(t *testing.T, cmd *cli.Command) {
 			assert.NotEmpty(t, v.Usage)
 		}
 	}
-	for _, scmd := range cmd.Subcommands {
+
+	for _, scmd := range cmd.Commands {
 		testCommand(t, scmd)
 	}
 }
 
 func TestCommands(t *testing.T) {
-	u := gptest.NewUnitTester(t)
-	defer u.Remove()
+	// necessary for setting up the env
+	u := gptest.NewGUnitTester(t)
+	assert.NotNil(t, u)
 
 	for _, cmd := range GetCommands() {
 		testCommand(t, cmd)

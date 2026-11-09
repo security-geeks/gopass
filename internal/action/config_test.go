@@ -2,28 +2,28 @@ package action
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
+	"github.com/gopasspw/gopass/pkg/fsutil"
 	"github.com/gopasspw/gopass/tests/gptest"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestConfig(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithInteractive(ctx, false)
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
 	buf := &bytes.Buffer{}
 	out.Stdout = buf
@@ -37,95 +37,115 @@ func TestConfig(t *testing.T) {
 		defer buf.Reset()
 
 		c := gptest.CliCtx(ctx, t)
-		assert.NoError(t, act.Config(c))
-		want := `autoclip: true
-autoimport: true
-cliptimeout: 45
-exportkeys: true
-nocolor: false
-nopager: false
-notifications: true
-parsing: true
+		require.NoError(t, act.Config(ctx, c))
+		want := `age.agent-enabled = false
+age.agent-timeout = 0
+core.autoimport = true
+core.autopush = true
+core.autosync = true
+core.casefold = false
+core.cliptimeout = 45
+core.exportkeys = true
+core.follow-references = false
+core.nopager = true
+core.notifications = true
+generate.autoclip = true
+gpg.timeout = 60
 `
-		want += "path: " + u.StoreDir("") + "\n"
-		want += `safecontent: false
-`
+		want += "mounts.path = " + fsutil.ShrinkPath(u.StoreDir("")) + "\n" +
+			"pwgen.xkcd-lang = en\n" +
+			"show.fuzzysearch = true\n" +
+			"show.password = false\n"
 		assert.Equal(t, want, buf.String())
 	})
 
 	t.Run("set valid config value", func(t *testing.T) {
 		defer buf.Reset()
 
-		assert.NoError(t, act.setConfigValue(ctx, "nopager", "true"))
-		assert.Equal(t, "nopager: true", strings.TrimSpace(buf.String()), "action.setConfigValue")
+		require.NoError(t, act.setConfigValue(ctx, "", "core.nopager", "true"))
+
+		// should print accepted config value
+		assert.Equal(t, "true", strings.TrimSpace(buf.String()), "action.setConfigValue")
 	})
 
 	t.Run("set invalid config value", func(t *testing.T) {
 		defer buf.Reset()
 
-		assert.Error(t, act.setConfigValue(ctx, "foobar", "true"))
+		require.Error(t, act.setConfigValue(ctx, "", "foobar", "true"))
 	})
 
 	t.Run("print single config value", func(t *testing.T) {
 		defer buf.Reset()
 
-		act.printConfigValues(ctx, "nopager")
+		act.printConfigValues(ctx, "", "core.nopager")
 
-		want := "nopager: true"
+		want := "true"
 		assert.Equal(t, want, strings.TrimSpace(buf.String()), "action.printConfigValues")
 	})
 
 	t.Run("print all config values", func(t *testing.T) {
 		defer buf.Reset()
 
-		act.printConfigValues(ctx)
-		want := `autoclip: true
-autoimport: true
-cliptimeout: 45
-exportkeys: true
-nocolor: false
-nopager: true
-notifications: true
-parsing: true
+		act.printConfigValues(ctx, "")
+		want := `age.agent-enabled = false
+age.agent-timeout = 0
+core.autoimport = true
+core.autopush = true
+core.autosync = true
+core.casefold = false
+core.cliptimeout = 45
+core.exportkeys = true
+core.follow-references = false
+core.nopager = true
+core.notifications = true
+generate.autoclip = true
+gpg.timeout = 60
 `
-		want += "path: " + u.StoreDir("") + "\n"
-		want += `safecontent: false`
-		assert.Equal(t, want, strings.TrimSpace(buf.String()), "action.printConfigValues")
+		want += "mounts.path = " + fsutil.ShrinkPath(u.StoreDir("")) + "\n" +
+			"pwgen.xkcd-lang = en\n" +
+			"show.fuzzysearch = true\n" +
+			"show.password = false\n"
 
-		delete(act.cfg.Mounts, "foo")
+		assert.Equal(t, want, buf.String(), "action.printConfigValues")
 	})
 
 	t.Run("show autoimport value", func(t *testing.T) {
 		defer buf.Reset()
 
-		c := gptest.CliCtx(ctx, t, "autoimport")
-		assert.NoError(t, act.Config(c))
-		assert.Equal(t, "autoimport: true", strings.TrimSpace(buf.String()))
+		c := gptest.CliCtx(ctx, t, "core.autoimport")
+		require.NoError(t, act.Config(ctx, c))
+		assert.Equal(t, "true", strings.TrimSpace(buf.String()))
 	})
 
 	t.Run("disable autoimport", func(t *testing.T) {
 		defer buf.Reset()
 
-		c := gptest.CliCtx(ctx, t, "autoimport", "false")
-		assert.NoError(t, act.Config(c))
-		assert.Equal(t, "autoimport: false", strings.TrimSpace(buf.String()))
+		c := gptest.CliCtx(ctx, t, "core.autoimport", "false")
+		require.NoError(t, act.Config(ctx, c))
+		assert.Equal(t, "false", strings.TrimSpace(buf.String()))
 	})
 
 	t.Run("complete config items", func(t *testing.T) {
 		defer buf.Reset()
 
-		act.ConfigComplete(gptest.CliCtx(ctx, t))
-		want := `autoclip
-autoimport
-cliptimeout
-exportkeys
-nocolor
-nopager
-notifications
-parsing
-path
-remote
-safecontent
+		act.ConfigComplete(ctx, gptest.CliCtx(ctx, t))
+		want := `age.agent-enabled
+age.agent-timeout
+core.autoimport
+core.autopush
+core.autosync
+core.casefold
+core.cliptimeout
+core.exportkeys
+core.follow-references
+core.nopager
+core.notifications
+generate.autoclip
+gpg.timeout
+mounts.path
+pwgen.xkcd-lang
+show.fuzzysearch
+show.password
 `
 		assert.Equal(t, want, buf.String())
 	})
@@ -134,6 +154,6 @@ safecontent
 		defer buf.Reset()
 
 		c := gptest.CliCtx(ctx, t, "autoimport", "false", "42")
-		assert.Error(t, act.Config(c))
+		require.Error(t, act.Config(ctx, c))
 	})
 }

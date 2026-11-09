@@ -1,3 +1,5 @@
+// Package cui provides a simple command line user interface
+// for gopass. It is used to interact with the user.
 package cui
 
 import (
@@ -10,8 +12,8 @@ import (
 	"github.com/gopasspw/gopass/pkg/termio"
 )
 
-// GetSelection show a navigateable multiple-choice list to the user
-// and returns the selected entry along with the action
+// GetSelection show a navigable multiple-choice list to the user
+// and returns the selected entry along with the action.
 func GetSelection(ctx context.Context, prompt string, choices []string) (string, int) {
 	if ctxutil.IsAlwaysYes(ctx) || !ctxutil.IsInteractive(ctx) {
 		return "impossible", 0
@@ -37,5 +39,6 @@ func GetSelection(ctx context.Context, prompt string, choices []string) (string,
 		}
 	}
 	fmt.Println(i)
+
 	return "default", i
 }

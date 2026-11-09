@@ -1,12 +1,15 @@
 package gpg
 
 import (
-	"context"
 	"testing"
+
+	"github.com/gopasspw/gopass/internal/config"
 )
 
 func TestAlwaysTrust(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
 
 	if IsAlwaysTrust(ctx) {
 		t.Errorf("AlwaysTrust should be false")

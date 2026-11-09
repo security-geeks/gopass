@@ -3,29 +3,42 @@ package config
 import (
 	"context"
 
-	"github.com/gopasspw/gopass/pkg/ctxutil"
+	"github.com/gopasspw/gitconfig"
+	"github.com/gopasspw/gopass/pkg/debug"
 )
 
-// WithContext returns a context with all config options set for this store
-// config, iff they have not been already set in the context
-func (c *Config) WithContext(ctx context.Context) context.Context {
-	if !c.AutoImport {
-		ctx = ctxutil.WithImportFunc(ctx, nil)
+type contextKey int
+
+const (
+	ctxKeyConfig contextKey = iota
+	ctxKeyMountPoint
+)
+
+func (c *Config) WithConfig(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKeyConfig, c)
+}
+
+func WithMount(ctx context.Context, mp string) context.Context {
+	return context.WithValue(ctx, ctxKeyMountPoint, mp)
+}
+
+// FromContext returns a config from a context, as well as the current mount point (store name) if found.
+func FromContext(ctx context.Context) (*Config, string) {
+	mount := ""
+	if m, found := ctx.Value(ctxKeyMountPoint).(string); found && m != "" {
+		mount = m
 	}
-	if !ctxutil.HasExportKeys(ctx) {
-		ctx = ctxutil.WithExportKeys(ctx, c.ExportKeys)
+
+	if c, found := ctx.Value(ctxKeyConfig).(*Config); found && c != nil {
+		return c, mount
 	}
-	if !ctxutil.HasNoPager(ctx) {
-		ctx = ctxutil.WithNoPager(ctx, c.NoPager)
+
+	debug.Log("no config in context, loading anew")
+
+	cfg := &Config{
+		root: newGitconfig().LoadAll(""),
 	}
-	if !ctxutil.HasNotifications(ctx) {
-		ctx = ctxutil.WithNotifications(ctx, c.Notifications)
-	}
-	if !ctxutil.HasShowSafeContent(ctx) {
-		ctx = ctxutil.WithShowSafeContent(ctx, c.SafeContent)
-	}
-	if !ctxutil.HasShowParsing(ctx) {
-		ctx = ctxutil.WithShowParsing(ctx, c.Parsing)
-	}
-	return ctx
+	cfg.root.Preset = gitconfig.NewFromMap(defaults)
+
+	return cfg, mount
 }

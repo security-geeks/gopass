@@ -4,26 +4,30 @@ import (
 	"context"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/stretchr/testify/assert"
-	"github.com/urfave/cli/v2"
+	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
 func TestCreateActions(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
 	cas := Actions{
 		{
 			Name: "foo",
 		},
 		{
 			Name: "bar",
-			Fn: func(context.Context, *cli.Context) error {
+			Fn: func(context.Context, *cli.Command) error {
 				return nil
 			},
 		},
 	}
 	assert.Equal(t, []string{"foo", "bar"}, cas.Selection())
-	assert.Error(t, cas.Run(ctx, nil, 0))
-	assert.NoError(t, cas.Run(ctx, nil, 1))
-	assert.Error(t, cas.Run(ctx, nil, 2))
-	assert.Error(t, cas.Run(ctx, nil, 66))
+	require.Error(t, cas.Run(ctx, nil, 0))
+	require.NoError(t, cas.Run(ctx, nil, 1))
+	require.Error(t, cas.Run(ctx, nil, 2))
+	require.Error(t, cas.Run(ctx, nil, 66))
 }

@@ -1,34 +1,28 @@
 package leaf
 
 import (
-	"bytes"
-	"context"
-	"os"
+	"runtime"
 	"testing"
 
 	"github.com/gopasspw/gopass/internal/backend/crypto/plain"
 	"github.com/gopasspw/gopass/internal/backend/storage/fs"
-	"github.com/gopasspw/gopass/internal/out"
-	"github.com/gopasspw/gopass/pkg/ctxutil"
+	"github.com/gopasspw/gopass/internal/config"
+	"github.com/gopasspw/gopass/internal/recipients"
+	"github.com/gopasspw/gopass/internal/store"
 	"github.com/gopasspw/gopass/pkg/gopass/secrets"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestFsck(t *testing.T) {
-	ctx := context.Background()
-	ctx = ctxutil.WithExportKeys(ctx, false)
+	t.Parallel()
 
-	obuf := &bytes.Buffer{}
-	out.Stdout = obuf
-	defer func() {
-		out.Stdout = os.Stdout
-	}()
+	ctx := config.NewContextInMemory()
+
+	ctx, stdout, _ := captureOutput(t, ctx)
 
 	// common setup
-	tempdir, err := os.MkdirTemp("", "gopass-")
-	require.NoError(t, err)
+	tempdir := t.TempDir()
 
 	s := &Store{
 		alias:   "",
@@ -36,26 +30,105 @@ func TestFsck(t *testing.T) {
 		crypto:  plain.New(),
 		storage: fs.New(tempdir),
 	}
-	assert.NoError(t, s.saveRecipients(ctx, []string{"john.doe"}, "test"))
+
+	rs := recipients.New()
+	rs.Add("john.doe")
+
+	require.NoError(t, s.saveRecipients(ctx, rs, "test"))
 
 	for _, e := range []string{"foo/bar", "foo/baz", "foo/zab"} {
-		sec := &secrets.Plain{}
+		sec := secrets.NewAKV()
 		sec.SetPassword("bar")
-		assert.NoError(t, s.Set(ctx, e, sec))
+		require.NoError(t, s.Set(ctx, e, sec))
 	}
 
-	assert.NoError(t, s.Fsck(ctx, ""))
-	obuf.Reset()
+	require.NoError(t, s.Fsck(ctx, "", nil))
+	seekStart(t, stdout)
+}
 
-	// common tear down
-	_ = os.RemoveAll(tempdir)
+func TestFsckCheckCaseConflicts(t *testing.T) {
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
+
+	tempdir := t.TempDir()
+
+	s := &Store{
+		alias:   "",
+		path:    tempdir,
+		crypto:  plain.New(),
+		storage: fs.New(tempdir),
+	}
+
+	rs := recipients.New()
+	rs.Add("john.doe")
+	require.NoError(t, s.saveRecipients(ctx, rs, "test"))
+
+	// Set up entries with no case conflicts — should be fine.
+	for _, e := range []string{"foo/bar", "foo/baz"} {
+		sec := secrets.NewAKV()
+		sec.SetPassword("x")
+		require.NoError(t, s.Set(ctx, e, sec))
+	}
+
+	assert.NoError(t, s.fsckCheckCaseConflicts(ctx),
+		"no case conflicts expected")
+
+	// Now add entries that differ only in case.
+	for _, e := range []string{"foo/Bar", "Foo/baz"} {
+		sec := secrets.NewAKV()
+		sec.SetPassword("x")
+		if runtime.GOOS == "linux" {
+			require.NoError(t, s.Set(ctx, e, sec), "Linux should allow case conflicts")
+		} else {
+			require.ErrorIs(t, s.Set(ctx, e, sec), store.ErrMeaninglessWrite)
+		}
+	}
+
+	err := s.fsckCheckCaseConflicts(ctx)
+	if runtime.GOOS == "linux" {
+		// On case-sensitive filesystems the conflicting entries were stored
+		// successfully, so the check must report them.
+		assert.Error(t, err, "case conflicts should be reported")
+	} else {
+		// On case-insensitive filesystems (macOS, Windows) the Set calls
+		// above returned ErrMeaninglessWrite, so no conflicting entries were
+		// ever written and the check should find nothing.
+		assert.NoError(t, err, "no case conflicts expected on case-insensitive filesystem")
+	}
 }
 
 func TestCompareStringSlices(t *testing.T) {
-	want := []string{"foo", "bar"}
-	have := []string{"baz", "bar"}
+	t.Parallel()
 
-	missing, extra := compareStringSlices(want, have)
-	assert.Equal(t, []string{"foo"}, missing)
-	assert.Equal(t, []string{"baz"}, extra)
+	for _, tc := range []struct {
+		name    string
+		from    []string
+		to      []string
+		missing []string
+		extra   []string
+	}{
+		{
+			name:    "Add foo, remove baz",
+			from:    []string{"foo", "bar"},
+			to:      []string{"baz", "bar"},
+			missing: []string{"foo"},
+			extra:   []string{"baz"},
+		},
+		{
+			name:    "Add foo, bar, baz, zab",
+			from:    []string{"foo", "bar"},
+			to:      []string{"foo", "bar", "bar", "baz", "zab"},
+			missing: []string{},
+			extra:   []string{"baz", "zab"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			missing, extra := compareStringSlices(tc.from, tc.to)
+			assert.Equal(t, tc.missing, missing)
+			assert.Equal(t, tc.extra, extra)
+		})
+	}
 }

@@ -3,7 +3,7 @@ package action
 import (
 	"bytes"
 	"context"
-	"flag"
+	"fmt"
 	"os"
 	"regexp"
 	"runtime"
@@ -11,33 +11,34 @@ import (
 	"testing"
 
 	"github.com/fatih/color"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
+	"github.com/gopasspw/gopass/pkg/pwgen/pwrules"
 	"github.com/gopasspw/gopass/tests/gptest"
-	"github.com/urfave/cli/v2"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
 func TestRuleLookup(t *testing.T) {
-	domain, _ := hasPwRuleForSecret("foo/amazon.de")
-	assert.Equal(t, "", domain)
+	domain, _ := hasPwRuleForSecret(config.NewContextInMemory(), "foo/gopass.pw")
+	assert.Empty(t, domain)
 }
 
 func TestGenerate(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithInteractive(ctx, false)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
-	act.cfg.AutoClip = false
+	require.NoError(t, act.cfg.Set("", "generate.autoclip", "false"))
 
 	buf := &bytes.Buffer{}
 	out.Stdout = buf
@@ -50,7 +51,7 @@ func TestGenerate(t *testing.T) {
 
 	// generate
 	t.Run("generate", func(t *testing.T) {
-		assert.Error(t, act.Generate(gptest.CliCtx(ctx, t)))
+		require.Error(t, act.Generate(ctx, gptest.CliCtx(ctx, t)))
 		buf.Reset()
 	})
 
@@ -60,7 +61,7 @@ func TestGenerate(t *testing.T) {
 			t.Skip("skipping test in short mode.")
 		}
 
-		assert.NoError(t, act.Generate(gptest.CliCtx(ctx, t, "foobar")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtx(ctx, t, "foobar")))
 		buf.Reset()
 	})
 
@@ -71,7 +72,7 @@ func TestGenerate(t *testing.T) {
 			t.Skip("skipping test in short mode.")
 		}
 
-		assert.NoError(t, act.Generate(gptest.CliCtx(ctx, t, "foobar")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtx(ctx, t, "foobar")))
 		buf.Reset()
 	})
 
@@ -81,7 +82,7 @@ func TestGenerate(t *testing.T) {
 			t.Skip("skipping test in short mode.")
 		}
 
-		assert.NoError(t, act.Generate(gptest.CliCtxWithFlags(ctx, t, map[string]string{"edit": "true", "editor": "/bin/cat"}, "foobar")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"edit": "true", "editor": "/usr/bin/env cat"}, "foobar")))
 		buf.Reset()
 	})
 
@@ -91,7 +92,7 @@ func TestGenerate(t *testing.T) {
 			t.Skip("skipping test in short mode.")
 		}
 
-		assert.NoError(t, act.Generate(gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true"}, "foobar")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true"}, "foobar")))
 		buf.Reset()
 	})
 
@@ -101,7 +102,7 @@ func TestGenerate(t *testing.T) {
 			t.Skip("skipping test in short mode.")
 		}
 
-		assert.NoError(t, act.Generate(gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true"}, "foobar", "32")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true"}, "foobar", "32")))
 		buf.Reset()
 	})
 
@@ -111,7 +112,7 @@ func TestGenerate(t *testing.T) {
 			t.Skip("skipping test in short mode.")
 		}
 
-		assert.NoError(t, act.Generate(gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "print": "true", "symbols": "true"}, "foobar", "32")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "print": "true", "symbols": "true"}, "foobar", "32")))
 		passIsAlphaNum(t, buf.String(), false)
 		buf.Reset()
 	})
@@ -122,37 +123,89 @@ func TestGenerate(t *testing.T) {
 			t.Skip("skipping test in short mode.")
 		}
 
-		assert.NoError(t, act.Generate(gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "print": "true", "symbols": "false"}, "foobar", "32")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "print": "true", "symbols": "false"}, "foobar", "32")))
 		passIsAlphaNum(t, buf.String(), true)
 		buf.Reset()
 	})
 
 	// generate --force --xkcd foobar 32
 	t.Run("generate --force --xkcd foobar 32", func(t *testing.T) {
-		assert.NoError(t, act.Generate(gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "xkcd": "true", "lang": "en"}, "foobar", "32")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "xkcd": "true", "lang": "en"}, "foobar", "32")))
 		buf.Reset()
 	})
 
 	// generate --force --xkcd foobar baz 32
 	t.Run("generate --force --xkcd foobar baz 32", func(t *testing.T) {
-		assert.NoError(t, act.Generate(gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "xkcd": "true", "lang": "en"}, "foobar", "baz", "32")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "xkcd": "true", "lang": "en"}, "foobar", "baz", "32")))
 		buf.Reset()
 	})
 
 	// generate --force --xkcd foobar baz
 	t.Run("generate --force --xkcd foobar baz", func(t *testing.T) {
-		assert.NoError(t, act.Generate(gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "xkcd": "true", "lang": "en"}, "foobar", "baz")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "xkcd": "true", "lang": "en"}, "foobar", "baz")))
 		buf.Reset()
 	})
 
 	// generate --force --xkcd --print foobar baz
 	t.Run("generate --force --xkcd --print foobar baz", func(t *testing.T) {
-		assert.NoError(t, act.Generate(gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "xkcd": "true", "print": "true", "lang": "en"}, "foobar", "baz")))
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "xkcd": "true", "print": "true", "lang": "en"}, "foobar", "baz")))
+		buf.Reset()
+	})
+
+	// generate --force foobar 24 w/ autoclip and output redirection
+	t.Run("generate --force foobar 24", func(t *testing.T) {
+		ov := act.cfg.Get("generate.autoclip")
+		defer func() {
+			require.NoError(t, act.cfg.Set("", "generate.autoclip", ov))
+		}()
+		require.NoError(t, act.cfg.Set("", "generate.autoclip", "true"))
+		ctx := ctxutil.WithTerminal(ctx, false)
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true"}, "foobar", "24")))
+		assert.Contains(t, buf.String(), "Not printing secrets by default")
+		buf.Reset()
+	})
+
+	// generate --force foobar 24 w/ autoclip and no output redirection
+	t.Run("generate --force foobar 24", func(t *testing.T) {
+		ov := act.cfg.Get("generate.autoclip")
+		defer func() {
+			require.NoError(t, act.cfg.Set("", "generate.autoclip", ov))
+		}()
+		require.NoError(t, act.cfg.Set("", "generate.autoclip", "true"))
+		ctx := ctxutil.WithTerminal(ctx, true)
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true"}, "foobar", "24")))
+		assert.Contains(t, buf.String(), "Copied to clipboard")
+		buf.Reset()
+	})
+
+	// generate --force foobar w/ pw length set via env variable (42 chars)
+	t.Run("generate --force foobar", func(t *testing.T) {
+		t.Setenv("GOPASS_PW_DEFAULT_LENGTH", "42")
+
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "print": "true", "symbols": "false"}, "foobar")))
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		assert.Len(t, lines[3], 42)
+		buf.Reset()
+	})
+
+	// generate --force foobar w/ pw length set via env variable to invalid value, fallback mechanism
+	t.Run("generate --force foobar", func(t *testing.T) {
+		t.Setenv("GOPASS_PW_DEFAULT_LENGTH", "0")
+
+		if testing.Short() {
+			t.Skip("skipping test in short mode.")
+		}
+
+		require.NoError(t, act.Generate(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"force": "true", "print": "true", "symbols": "false"}, "foobar")))
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		assert.Len(t, lines[3], 24) // 24 = default value used as fallback
 		buf.Reset()
 	})
 }
 
 func passIsAlphaNum(t *testing.T, buf string, want bool) {
+	t.Helper()
+
 	reAlphaNum := regexp.MustCompile(`^[A-Za-z0-9]+$`)
 	lines := strings.Split(strings.TrimSpace(buf), "\n")
 	if len(lines) < 1 {
@@ -165,8 +218,6 @@ func passIsAlphaNum(t *testing.T, buf string, want bool) {
 }
 
 func TestKeyAndLength(t *testing.T) {
-	app := cli.NewApp()
-
 	for _, tc := range []struct {
 		in     []string
 		key    string
@@ -193,13 +244,22 @@ func TestKeyAndLength(t *testing.T) {
 			length: "",
 		},
 	} {
-		fs := flag.NewFlagSet("default", flag.ContinueOnError)
-		assert.NoError(t, fs.Parse(append([]string{"foobar"}, tc.in...)))
-		c := cli.NewContext(app, fs, nil)
-		args, _ := parseArgs(c)
-		k, l := keyAndLength(args)
-		assert.Equal(t, tc.key, k, "Key from %+v", tc.in)
-		assert.Equal(t, tc.length, l, "Length from %+v", tc.in)
+		t.Run(fmt.Sprintf("%v", tc.in), func(t *testing.T) {
+			var gotArgs argList
+
+			cmd := &cli.Command{
+				Action: func(c context.Context, cmd *cli.Command) error {
+					gotArgs, _ = parseArgs(c, cmd)
+
+					return nil
+				},
+			}
+			// "foobar" is the binary name (consumed by cli), "myname" is the secret name (args[0]).
+			require.NoError(t, cmd.Run(context.Background(), append([]string{"foobar", "myname"}, tc.in...)))
+			k, l := keyAndLength(gotArgs)
+			assert.Equal(t, tc.key, k, "Key from %+v", tc.in)
+			assert.Equal(t, tc.length, l, "Length from %+v", tc.in)
+		})
 	}
 }
 
@@ -216,7 +276,9 @@ func TestExtractEmails(t *testing.T) {
 			out: []string{"john.doe@example.org", "user@example.org"},
 		},
 	} {
-		assert.Equal(t, tc.out, extractEmails(tc.in))
+		t.Run(fmt.Sprintf("%v", tc.in), func(t *testing.T) {
+			assert.Equal(t, tc.out, extractEmails(tc.in))
+		})
 	}
 }
 
@@ -233,7 +295,9 @@ func TestExtractDomains(t *testing.T) {
 			out: []string{"gmail.com", "live.com", "web.de"},
 		},
 	} {
-		assert.Equal(t, tc.out, extractDomains(tc.in))
+		t.Run(fmt.Sprintf("%v", tc.in), func(t *testing.T) {
+			assert.Equal(t, tc.out, extractDomains(tc.in))
+		})
 	}
 }
 
@@ -250,7 +314,9 @@ func TestUniq(t *testing.T) {
 			out: []string{"bar", "foo"},
 		},
 	} {
-		assert.Equal(t, tc.out, uniq(tc.in))
+		t.Run(fmt.Sprintf("%v", tc.in), func(t *testing.T) {
+			assert.Equal(t, tc.out, uniq(tc.in))
+		})
 	}
 }
 
@@ -274,6 +340,112 @@ func TestFilterPrefix(t *testing.T) {
 			out:    []string{"foo/bar", "foo/baz"},
 		},
 	} {
-		assert.Equal(t, tc.out, filterPrefix(tc.in, tc.prefix))
+		t.Run(fmt.Sprintf("%v", tc.in), func(t *testing.T) {
+			assert.Equal(t, tc.out, filterPrefix(tc.in, tc.prefix))
+		})
+	}
+}
+
+// NOTE: Do not use t.Parallel because environment variables are being used
+// which can leak into other tests that run in parallel.
+func TestDefaultLengthFromEnv(t *testing.T) {
+	const pwLengthEnvName = "GOPASS_PW_DEFAULT_LENGTH"
+
+	ctx := config.NewContextInMemory()
+
+	t.Run("use default value if no environment variable is set", func(t *testing.T) {
+		actual, isCustom := config.DefaultPasswordLengthFromEnv(ctx)
+		expected := config.DefaultPasswordLength
+		assert.Equal(t, expected, actual)
+		assert.False(t, isCustom)
+	})
+
+	t.Run("interpretetion of various inputs for environment variable", func(t *testing.T) {
+		for _, tc := range []struct {
+			in       string
+			expected int
+			custom   bool
+		}{
+			{in: "42", expected: 42, custom: true},
+			{in: "1", expected: 1, custom: true},
+			{in: "0", expected: config.DefaultPasswordLength, custom: false},
+			{in: "abc", expected: config.DefaultPasswordLength, custom: false},
+			{in: "-1", expected: config.DefaultPasswordLength, custom: false},
+		} {
+			t.Setenv(pwLengthEnvName, tc.in)
+			actual, isCustom := config.DefaultPasswordLengthFromEnv(ctx)
+			assert.Equal(t, tc.expected, actual)
+			assert.Equal(t, isCustom, tc.custom)
+		}
+	})
+}
+
+func TestHasPwRuleForSecret(t *testing.T) {
+	ctx := t.Context()
+
+	wantRule := pwrules.Rule{
+		Minlen:   8,
+		Maxlen:   63,
+		Required: []string{"digit", "lower", "upper"},
+		Allowed:  []string{"ascii-printable"},
+		Exact:    false,
+	}
+	for _, tc := range []struct {
+		name   string
+		input  string
+		domain string
+		want   pwrules.Rule
+	}{
+		{
+			name:   "domain only",
+			input:  "websites/apple.com",
+			domain: "apple.com",
+			want:   wantRule,
+		},
+		{
+			name:   "domain and username",
+			input:  "websites/apple.com/gopass",
+			domain: "apple.com",
+			want:   wantRule,
+		},
+		{
+			name:   "domain and email",
+			input:  "websites/apple.com/gopass@gopass.pw",
+			domain: "apple.com",
+			want:   wantRule,
+		},
+		{
+			name:   "domain and user that looks like a domain",
+			input:  "websites/apple.com/gopass.pw",
+			domain: "apple.com",
+			want:   wantRule,
+		},
+		{
+			name:   "empty input",
+			input:  "",
+			domain: "",
+			want:   pwrules.Rule{},
+		},
+		{
+			// domains are search for starting from the end of the string, so
+			// the the further right the domain is, the more specific it is.
+			name:   "double domains",
+			input:  "websites/apple.com/google.com",
+			domain: "google.com",
+			want: pwrules.Rule{
+				Minlen:    8,
+				Maxlen:    0,
+				Required:  []string{},
+				Allowed:   []string{"", "digit", "lower", "upper"},
+				Maxconsec: 0,
+				Exact:     false,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			domain, rule := hasPwRuleForSecret(ctx, tc.input)
+			assert.Equal(t, tc.domain, domain, tc.name)
+			assert.Equal(t, tc.want, rule, tc.name)
+		})
 	}
 }

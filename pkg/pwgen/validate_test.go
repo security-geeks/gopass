@@ -3,10 +3,12 @@ package pwgen
 import (
 	"testing"
 
-	"gotest.tools/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMaxConsec(t *testing.T) {
+	t.Parallel()
+
 	// good
 	for _, tc := range []string{
 		"abcd",
@@ -15,7 +17,7 @@ func TestMaxConsec(t *testing.T) {
 		"AaAa",
 		"aaabbbaaa",
 	} {
-		assert.Equal(t, true, containsMaxConsecutive(tc, 4))
+		assert.True(t, containsMaxConsecutive(tc, 4))
 	}
 	// bad
 	for _, tc := range []string{
@@ -24,15 +26,24 @@ func TestMaxConsec(t *testing.T) {
 		"fooobar",
 		"AaaaA",
 	} {
-		assert.Equal(t, false, containsMaxConsecutive(tc, 3))
+		assert.False(t, containsMaxConsecutive(tc, 3))
 	}
 }
 
 func TestContainsOnly(t *testing.T) {
+	t.Parallel()
+
 	// good
 	for _, tc := range []string{
 		"aBcDeF",
 	} {
-		assert.Equal(t, true, containsOnlyClasses(tc, Upper+Lower))
+		assert.True(t, containsOnlyClasses(tc, Upper+Lower))
+	}
+
+	// bad
+	for _, tc := range []string{
+		"aBcDeF3",
+	} {
+		assert.False(t, containsOnlyClasses(tc, Upper+Lower))
 	}
 }

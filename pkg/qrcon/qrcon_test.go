@@ -4,18 +4,21 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func ExampleQRCode() {
+func ExampleQRCode() { //nolint:testableexamples
 	code, err := QRCode("foo")
 	if err != nil {
 		panic(err)
 	}
+
 	fmt.Println(code)
 }
 
 func TestQRCode(t *testing.T) {
+	t.Parallel()
+
 	_, err := QRCode("https://www.gopass.pw/")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }

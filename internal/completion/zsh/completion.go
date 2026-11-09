@@ -1,3 +1,4 @@
+// Package zsh implements a zsh completion script generator.
 package zsh
 
 import (
@@ -6,8 +7,11 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
+
+// ErrUnknownType is returned when an unknown type is encountered.
+var ErrUnknownType = fmt.Errorf("unknown type")
 
 func longName(name string) string {
 	// "If s does not contain sep and sep is not empty, Split returns a slice of length 1 whose only element is s."
@@ -15,7 +19,23 @@ func longName(name string) string {
 	return strings.TrimSpace(strings.Split(name, ",")[0])
 }
 
+func escapePasswordName(name string) string {
+	// Escape special characters for zsh _values command.
+	// Must escape backslash first to avoid double-escaping.
+	// Then escape colon (used as value:description separator) and brackets (glob chars)
+	name = strings.ReplaceAll(name, "\\", "\\\\")
+	name = strings.ReplaceAll(name, ":", "\\:")
+	name = strings.ReplaceAll(name, "[", "\\[")
+	name = strings.ReplaceAll(name, "]", "\\]")
+
+	return name
+}
+
 func formatFlag(name, usage string) string {
+	// Suare brackets must be escaped in zsh completions
+	usage = strings.ReplaceAll(usage, "[", "\\[")
+	usage = strings.ReplaceAll(usage, "]", "\\]")
+
 	return fmt.Sprintf("--%s[%s]", longName(name), usage)
 }
 
@@ -45,23 +65,27 @@ func formatFlagFunc() func(cli.Flag) (string, error) {
 		case *cli.UintFlag:
 			return formatFlag(ft.Name, ft.Usage), nil
 		default:
-			return "", fmt.Errorf("unknown type: '%T'", f)
+			return "", fmt.Errorf("error '%T': %w", f, ErrUnknownType)
 		}
 	}
 }
 
-// GetCompletion returns a zsh completion script
-func GetCompletion(a *cli.App) (string, error) {
+// GetCompletion returns a zsh completion script.
+func GetCompletion(a *cli.Command) (string, error) {
 	tplFuncs := template.FuncMap{
-		"formatFlag": formatFlagFunc(),
+		"formatFlag":         formatFlagFunc(),
+		"escapePasswordName": escapePasswordName,
 	}
+
 	tpl, err := template.New("zsh").Funcs(tplFuncs).Parse(zshTemplate)
 	if err != nil {
 		return "", err
 	}
+
 	buf := &bytes.Buffer{}
 	if err := tpl.Execute(buf, a); err != nil {
 		return "", err
 	}
+
 	return buf.String(), nil
 }

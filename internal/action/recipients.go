@@ -2,21 +2,22 @@ package action
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	"github.com/gopasspw/gopass/internal/tree"
-
+	"github.com/gopasspw/gopass/internal/action/exit"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/cui"
 	"github.com/gopasspw/gopass/internal/out"
+	"github.com/gopasspw/gopass/internal/tree"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/debug"
+	"github.com/gopasspw/gopass/pkg/set"
 	"github.com/gopasspw/gopass/pkg/termio"
-
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
-var (
-	removalWarning = `
+var removalWarning = `
 
 
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
@@ -32,26 +33,65 @@ This feature is only meant for revoking access to any added or changed
 credentials.
 
 `
-)
 
-// RecipientsPrint prints all recipients per store
-func (s *Action) RecipientsPrint(c *cli.Context) error {
-	ctx := ctxutil.WithGlobalFlags(c)
-	out.Printf(ctx, "Hint: run 'gopass sync' to import any missing public keys")
+// RecipientsPrint prints all recipients per store.
+func (s *recipientHandler) RecipientsPrint(ctx context.Context, cmd *cli.Command) error {
+	if cmd.Args().Len() > 0 {
+		return exit.Error(exit.Usage, nil, "Usage: %s recipients [--pretty] [--json]", s.Name)
+	}
 
-	t, err := s.Store.RecipientsTree(ctx, true)
+	return s.recipientsPrint(ctx, cmd, "")
+}
+
+// RecipientsList prints recipients below an optional prefix.
+func (s *recipientHandler) RecipientsList(ctx context.Context, cmd *cli.Command) error {
+	return s.recipientsPrint(ctx, cmd, cmd.Args().First())
+}
+
+func (s *recipientHandler) recipientsPrint(ctx context.Context, cmd *cli.Command, prefix string) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+
+	var t *tree.Root
+	var err error
+	if prefix == "" {
+		t, err = s.Store.RecipientsTree(ctx, cmd.Bool("pretty"))
+	} else {
+		t, err = s.Store.RecipientsTreePrefix(ctx, cmd.Bool("pretty"), prefix)
+	}
 	if err != nil {
-		return ExitError(ExitList, err, "failed to list recipients: %s", err)
+		if errors.Is(err, tree.ErrNotFound) {
+			return exit.Error(exit.NotFound, nil, "Recipient subtree %q not found", prefix)
+		}
+
+		return exit.Error(exit.List, err, "failed to list recipients: %s", err)
+	}
+
+	if prefix != "" {
+		t, err = t.FindFolder(prefix)
+		if err != nil {
+			return exit.Error(exit.NotFound, nil, "Recipient subtree %q not found", prefix)
+		}
+		t.SetName(prefix)
+	}
+
+	if cmd.Bool("json") {
+		return jsonWrite(stdout, t.List(tree.INF))
+	}
+
+	if prefix == "" {
+		out.Printf(ctx, "Hint: run 'gopass sync' to import any missing public keys")
 	}
 
 	fmt.Fprintln(stdout, t.Format(tree.INF))
+
 	return nil
 }
 
-func (s *Action) recipientsList(ctx context.Context) []string {
+func (s *recipientHandler) recipientsList(ctx context.Context) []string {
 	t, err := s.Store.RecipientsTree(ctxutil.WithHidden(ctx, true), false)
 	if err != nil {
 		debug.Log("failed to list recipients: %s", err)
+
 		return nil
 	}
 
@@ -59,31 +99,52 @@ func (s *Action) recipientsList(ctx context.Context) []string {
 }
 
 // RecipientsComplete will print a list of recipients for bash
-// completion
-func (s *Action) RecipientsComplete(c *cli.Context) {
-	ctx := ctxutil.WithGlobalFlags(c)
+// completion.
+func (s *recipientHandler) RecipientsComplete(ctx context.Context, cmd *cli.Command) {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+	if ok, err := s.Store.IsInitialized(ctx); err != nil || !ok {
+		debug.Log("store not initialized: %v", err)
+
+		return
+	}
+
 	for _, v := range s.recipientsList(ctx) {
 		fmt.Fprintln(stdout, v)
 	}
 }
 
-// RecipientsAdd adds new recipients
-func (s *Action) RecipientsAdd(c *cli.Context) error {
-	ctx := ctxutil.WithGlobalFlags(c)
-	store := c.String("store")
-	force := c.Bool("force")
+// RecipientsAck updates `recipients.hash`.
+func (s *recipientHandler) RecipientsAck(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+
+	return s.Store.SaveRecipients(ctxutil.WithHidden(ctx, true), true)
+}
+
+// RecipientsAdd adds new recipients.
+func (s *recipientHandler) RecipientsAdd(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+	store := cmd.String("store")
+	force := cmd.Bool("force")
 	added := 0
 
-	// select store
+	// select store.
 	if store == "" {
 		store = cui.AskForStore(ctx, s.Store)
 	}
 
+	if err := s.Store.CheckRecipients(ctx, store); err != nil && !force {
+		out.Errorf(ctx, "%s. Please remove expired keys or extend their validity. See https://go.gopass.pw/faq#expired-recipients", err.Error())
+
+		return exit.Error(exit.Recipients, err, "recipients invalid: %q", err)
+	}
+
 	crypto := s.Store.Crypto(ctx, store)
 
-	// select recipient
-	recipients := []string(c.Args().Slice())
+	// select recipient.
+	recipients := cmd.Args().Slice()
 	if len(recipients) < 1 {
+		out.Notice(ctx, "Fetching available recipients. Please wait...")
+
 		debug.Log("no recipients given, asking for selection")
 		r, err := s.recipientsSelectForAdd(ctx, store)
 		if err != nil {
@@ -96,8 +157,16 @@ func (s *Action) RecipientsAdd(c *cli.Context) error {
 	for _, r := range recipients {
 		keys, err := crypto.FindRecipients(ctx, r)
 		if err != nil {
-			out.Printf(ctx, "WARNING: Failed to list public key %q: %s", r, err)
-			if !force {
+			out.Warningf(ctx, "Failed to list public key %q: %s", r, err)
+			var imported bool
+			if sub, err := s.Store.GetSubStore(store); err == nil {
+				ctx = config.WithMount(ctx, store)
+				if err := sub.ImportMissingPublicKeys(ctx, r); err != nil {
+					out.Warningf(ctx, "Failed to import missing public keys: %s", err)
+				}
+				imported = err == nil
+			}
+			if !force && !imported {
 				continue
 			}
 			keys = []string{r}
@@ -107,46 +176,49 @@ func (s *Action) RecipientsAdd(c *cli.Context) error {
 			out.Printf(ctx, "If this is your key: gpg --edit-key %s; trust (set to ultimate); quit", r)
 			out.Printf(ctx, "If this is not your key: gpg --edit-key %s; lsign; trust; save; quit", r)
 			out.Printf(ctx, "You may need to run 'gpg --update-trustdb' afterwards")
+
 			continue
 		}
 
-		recp := r
 		debug.Log("found recipients for %q: %+v", r, keys)
 
-		if !termio.AskForConfirmation(ctx, fmt.Sprintf("Do you want to add %q (key %q) as a recipient to the store %q?", crypto.FormatKey(ctx, recp, ""), recp, store)) {
+		if !force && !termio.AskForConfirmation(ctx, fmt.Sprintf("Do you want to add %q (key %q) as a recipient to the store %q?", crypto.FormatKey(ctx, r, ""), r, store)) {
 			continue
 		}
 
-		if err := s.Store.AddRecipient(ctx, store, recp); err != nil {
-			return ExitError(ExitRecipients, err, "failed to add recipient %q: %s", r, err)
+		if err := s.Store.AddRecipient(ctx, store, r); err != nil {
+			return exit.Error(exit.Recipients, err, "failed to add recipient %q: %s", r, err)
 		}
 		added++
 	}
 	if added < 1 {
-		return ExitError(ExitUnknown, nil, "no key added")
+		return exit.Error(exit.Unknown, nil, "no key added")
 	}
 
 	out.Printf(ctx, "\nAdded %d recipients", added)
 	out.Printf(ctx, "You need to run 'gopass sync' to push these changes")
+
 	return nil
 }
 
-// RecipientsRemove removes recipients
-func (s *Action) RecipientsRemove(c *cli.Context) error {
-	ctx := ctxutil.WithGlobalFlags(c)
-	store := c.String("store")
-	force := c.Bool("force")
+// RecipientsRemove removes recipients.
+func (s *recipientHandler) RecipientsRemove(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+	store := cmd.String("store")
+	force := cmd.Bool("force")
 	removed := 0
 
-	// select store
-	if store == "" {
+	// select store if none is given.
+	if !cmd.IsSet("store") {
 		store = cui.AskForStore(ctx, s.Store)
 	}
 
+	// get the crypto backend from the store so we can perform the correct
+	// recipient checks.
 	crypto := s.Store.Crypto(ctx, store)
 
-	// select recipient
-	recipients := []string(c.Args().Slice())
+	// ask to select a recipient if none are given.
+	recipients := cmd.Args().Slice()
 	if len(recipients) < 1 {
 		rs, err := s.recipientsSelectForRemoval(ctx, store)
 		if err != nil {
@@ -155,16 +227,31 @@ func (s *Action) RecipientsRemove(c *cli.Context) error {
 		recipients = rs
 	}
 
+	knownRecipients := s.Store.ListRecipients(ctx, store)
+
+	// try to remove all given recipients.
 	for _, r := range recipients {
+		// check and warn if the user is trying to remove themselves
 		kl, err := crypto.FindIdentities(ctx, r)
-		if err == nil {
-			if len(kl) > 0 {
-				if !termio.AskForConfirmation(ctx, fmt.Sprintf("Do you want to remove yourself (%s) from the recipients?", r)) {
-					continue
-				}
+		if err == nil && len(kl) > 0 {
+			if !termio.AskForConfirmation(ctx, fmt.Sprintf("Do you want to remove yourself (%s) from the recipients?", r)) {
+				continue
 			}
 		}
 
+		// if a literal recipient (e.g. ID) is given just remove that w/o any kind of lookups.
+		if set.Contains(knownRecipients, r) {
+			debug.Log("Removing %q from %q (direct)", r, store)
+			if err := s.Store.RemoveRecipient(ctx, store, r); err != nil {
+				return exit.Error(exit.Recipients, err, "failed to remove recipient %q: %s", r, err)
+			}
+
+			removed++
+
+			continue
+		}
+
+		// look up the full key ID of the given recipient (could be email or any kind of short ID)
 		keys, err := crypto.FindRecipients(ctx, r)
 		if err != nil {
 			out.Printf(ctx, "WARNING: Failed to list public key %q: %s", r, err)
@@ -172,44 +259,57 @@ func (s *Action) RecipientsRemove(c *cli.Context) error {
 			if !force {
 				continue
 			}
+
 			keys = []string{r}
 		}
+		debug.Log("FindRecipients translated %q into %v", r, keys)
+
 		if len(keys) < 1 && !force {
 			out.Printf(ctx, "Warning: No matching valid key found. If the key is in your keyring you may need to validate it.")
 			out.Printf(ctx, "If this is your key: gpg --edit-key %s; trust (set to ultimate); quit", r)
 			out.Printf(ctx, "If this is not your key: gpg --edit-key %s; lsign; trust; save; quit", r)
 			out.Printf(ctx, "You may need to run 'gpg --update-trustdb' afterwards")
+
 			continue
 		}
 
-		recp := r
+		recp := r //nolint:copyloopvar
 		if len(keys) > 0 {
-			recp = crypto.Fingerprint(ctx, keys[0])
+			if nr := crypto.Fingerprint(ctx, keys[0]); nr != "" {
+				debug.Log("Fingerprint translated %q into %q", keys[0], nr)
+				recp = nr
+			}
 		}
 
+		debug.Log("Removing %q from %q (indirect)", recp, store)
 		if err := s.Store.RemoveRecipient(ctx, store, recp); err != nil {
-			return ExitError(ExitRecipients, err, "failed to remove recipient %q: %s", recp, err)
+			return exit.Error(exit.Recipients, err, "failed to remove recipient %q: %s", recp, err)
 		}
+
 		fmt.Fprintf(stdout, removalWarning, r)
 		removed++
 	}
+
 	if removed < 1 {
-		return ExitError(ExitUnknown, nil, "no key removed")
+		return exit.Error(exit.Unknown, nil, "no key removed")
 	}
 
 	out.Printf(ctx, "\nRemoved %d recipients", removed)
 	out.Printf(ctx, "You need to run 'gopass sync' to push these changes")
+
 	return nil
 }
 
-func (s *Action) recipientsSelectForRemoval(ctx context.Context, store string) ([]string, error) {
+func (s *recipientHandler) recipientsSelectForRemoval(ctx context.Context, store string) ([]string, error) {
 	crypto := s.Store.Crypto(ctx, store)
 
 	ids := s.Store.ListRecipients(ctx, store)
 	choices := make([]string, 0, len(ids))
+	formatted := crypto.FormatKeys(ctx, ids)
 	for _, id := range ids {
-		choices = append(choices, crypto.FormatKey(ctx, id, ""))
+		choices = append(choices, formatted[id])
 	}
+
 	if len(choices) < 1 {
 		return nil, nil
 	}
@@ -221,18 +321,20 @@ func (s *Action) recipientsSelectForRemoval(ctx context.Context, store string) (
 	case "show":
 		return []string{ids[sel]}, nil
 	default:
-		return nil, ExitError(ExitAborted, nil, "user aborted")
+		return nil, exit.Error(exit.Aborted, nil, "user aborted")
 	}
 }
 
-func (s *Action) recipientsSelectForAdd(ctx context.Context, store string) ([]string, error) {
+func (s *recipientHandler) recipientsSelectForAdd(ctx context.Context, store string) ([]string, error) {
 	crypto := s.Store.Crypto(ctx, store)
 
-	choices := []string{}
 	kl, _ := crypto.FindRecipients(ctx)
+	choices := make([]string, 0, len(kl))
+	formatted := crypto.FormatKeys(ctx, kl)
 	for _, key := range kl {
-		choices = append(choices, crypto.FormatKey(ctx, key, ""))
+		choices = append(choices, formatted[key])
 	}
+
 	if len(choices) < 1 {
 		return nil, nil
 	}
@@ -244,6 +346,55 @@ func (s *Action) recipientsSelectForAdd(ctx context.Context, store string) ([]st
 	case "show":
 		return []string{kl[sel]}, nil
 	default:
-		return nil, ExitError(ExitAborted, nil, "user aborted")
+		return nil, exit.Error(exit.Aborted, nil, "user aborted")
 	}
+}
+
+// RecipientsCanonicalize rewrites the .gpg-id of the given store so that every
+// recipient ID is in its canonical (full-fingerprint) form and renames the
+// corresponding .public-keys/ files to match. This migration does not require
+// re-encryption. After running this command, use 'gopass sync' to publish the
+// changes to other team members.
+func (s *recipientHandler) RecipientsCanonicalize(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+
+	store := cmd.String("store")
+	if store == "" {
+		store = cui.AskForStore(ctx, s.Store)
+	}
+
+	out.Printf(ctx, "Canonicalizing recipient IDs for store %q ...", store)
+
+	if err := s.Store.CanonicalizeRecipients(ctx, store); err != nil {
+		return exit.Error(exit.Recipients, err, "failed to canonicalize recipients: %s", err)
+	}
+
+	out.OKf(ctx, "Done. You may want to run 'gopass sync' to push changes.")
+
+	return nil
+}
+
+// RecipientsUpdate re-exports the named recipients' public keys from the
+// local keyring into .public-keys/, overwriting stale copies. This is the
+// 'gopass recipients update' command (Stage 4 / GH-1430). If no IDs are
+// given, the current user's own identity is updated.
+func (s *recipientHandler) RecipientsUpdate(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+
+	store := cmd.String("store")
+	if store == "" {
+		store = cui.AskForStore(ctx, s.Store)
+	}
+
+	ids := cmd.Args().Slice()
+
+	out.Printf(ctx, "Refreshing public keys in store %q ...", store)
+
+	if err := s.Store.UpdateRecipientKeys(ctx, store, ids); err != nil {
+		return exit.Error(exit.Recipients, err, "failed to update recipient keys: %s", err)
+	}
+
+	out.OKf(ctx, "Done. You may want to run 'gopass sync' to push the updated keys.")
+
+	return nil
 }

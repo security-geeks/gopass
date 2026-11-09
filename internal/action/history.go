@@ -1,32 +1,33 @@
 package action
 
 import (
+	"context"
 	"time"
 
+	"github.com/gopasspw/gopass/internal/action/exit"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/debug"
-
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
-// History displays the history of a given secret
-func (s *Action) History(c *cli.Context) error {
-	ctx := ctxutil.WithGlobalFlags(c)
-	name := c.Args().Get(0)
-	showPassword := c.Bool("password")
+// History displays the history of a given secret.
+func (s *searchHandler) History(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+	name := cmd.Args().Get(0)
+	showPassword := cmd.Bool("password")
 
 	if name == "" {
-		return ExitError(ExitUsage, nil, "Usage: %s history <NAME>", s.Name)
+		return exit.Error(exit.Usage, nil, "Usage: %s history <NAME>", s.Name)
 	}
 
 	if !s.Store.Exists(ctx, name) {
-		return ExitError(ExitNotFound, nil, "Secret not found")
+		return exit.Error(exit.NotFound, nil, "Secret not found")
 	}
 
 	revs, err := s.Store.ListRevisions(ctx, name)
 	if err != nil {
-		return ExitError(ExitUnknown, err, "Failed to get revisions: %s", err)
+		return exit.Error(exit.Unknown, err, "Failed to get revisions: %s", err)
 	}
 
 	for _, rev := range revs {
@@ -42,5 +43,6 @@ func (s *Action) History(c *cli.Context) error {
 		}
 		out.Printf(ctx, "%s - %s <%s> - %s - %s%s\n", rev.Hash, rev.AuthorName, rev.AuthorEmail, rev.Date.Format(time.RFC3339), rev.Subject, pw)
 	}
+
 	return nil
 }

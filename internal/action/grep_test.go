@@ -2,29 +2,27 @@ package action
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/gopass/secrets"
 	"github.com/gopasspw/gopass/tests/gptest"
-
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGrep(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithInteractive(ctx, false)
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
 	buf := &bytes.Buffer{}
 	out.Stdout = buf
@@ -35,25 +33,26 @@ func TestGrep(t *testing.T) {
 	c := gptest.CliCtx(ctx, t, "foo")
 	t.Run("empty store", func(t *testing.T) {
 		defer buf.Reset()
-		assert.NoError(t, act.Grep(c))
+		require.NoError(t, act.Grep(ctx, c))
 	})
 
 	t.Run("add some secret", func(t *testing.T) {
 		defer buf.Reset()
-		sec := &secrets.Plain{}
+		sec := secrets.NewAKV()
 		sec.SetPassword("foobar")
-		sec.WriteString("foobar")
-		assert.NoError(t, act.Store.Set(ctx, "foo", sec))
+		_, err := sec.Write([]byte("foobar"))
+		require.NoError(t, err)
+		require.NoError(t, act.Store.Set(ctx, "foo", sec))
 	})
 
 	t.Run("should find existing", func(t *testing.T) {
 		defer buf.Reset()
-		assert.NoError(t, act.Grep(c))
+		require.NoError(t, act.Grep(ctx, c))
 	})
 
 	t.Run("RE2", func(t *testing.T) {
 		defer buf.Reset()
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"regexp": "true"}, "f..bar")
-		assert.NoError(t, act.Grep(c))
+		require.NoError(t, act.Grep(ctx, c))
 	})
 }

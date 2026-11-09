@@ -3,9 +3,11 @@ package protect
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestProtect(t *testing.T) {
-	assert.NoError(t, Pledge(""))
+	t.Parallel()
+
+	require.NoError(t, Pledge(""))
 }

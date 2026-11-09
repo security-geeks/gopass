@@ -1,10 +1,11 @@
-// +build openbsd
+//go:build openbsd
 
 package protect
 
 import "golang.org/x/sys/unix"
 
-// ProtectEnabled lets us know if we have protection or not
+// ProtectEnabled lets us know if we have protection or not.
+// It is true on OpenBSD.
 var ProtectEnabled = true
 
 // Pledge on OpenBSD lets us "promise" to only run a subset of

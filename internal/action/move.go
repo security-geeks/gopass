@@ -1,34 +1,44 @@
 package action
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/gopasspw/gopass/internal/action/exit"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/termio"
-
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
-// Move the content from one secret to another
-func (s *Action) Move(c *cli.Context) error {
-	ctx := ctxutil.WithGlobalFlags(c)
-	force := c.Bool("force")
+// Move the content from one secret to another.
+func (s *secretHandler) Move(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
 
-	if c.Args().Len() != 2 {
-		return ExitError(ExitUsage, nil, "Usage: %s mv old-path new-path", s.Name)
+	if cmd.Args().Len() != 2 {
+		return exit.Error(exit.Usage, nil, "Usage: %s mv old-path new-path", s.Name)
 	}
 
-	from := c.Args().Get(0)
-	to := c.Args().Get(1)
+	from := cmd.Args().Get(0)
+	to := cmd.Args().Get(1)
 
-	if !force {
+	if !cmd.Bool("force") {
 		if s.Store.Exists(ctx, to) && !termio.AskForConfirmation(ctx, fmt.Sprintf("%s already exists. Overwrite it?", to)) {
-			return ExitError(ExitAborted, nil, "not overwriting your current secret")
+			return exit.Error(exit.Aborted, nil, "not overwriting your current secret")
 		}
 	}
 
+	// Check for custom commit message
+	commitMsg := fmt.Sprintf("Move %s to %s", from, to)
+	if cmd.IsSet("commit-message") {
+		commitMsg = cmd.String("commit-message")
+	}
+	if cmd.Bool("interactive-commit") {
+		commitMsg = ""
+	}
+	ctx = ctxutil.WithCommitMessage(ctx, commitMsg)
+
 	if err := s.Store.Move(ctx, from, to); err != nil {
-		return ExitError(ExitUnknown, err, "%s", err)
+		return exit.Error(exit.Unknown, err, "%s", err)
 	}
 
 	return nil

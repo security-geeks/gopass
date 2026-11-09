@@ -1,14 +1,14 @@
 package action
 
 import (
-	"context"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestWithClip(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
 	if IsClip(ctx) {
 		t.Errorf("Should be false")
@@ -20,7 +20,7 @@ func TestWithClip(t *testing.T) {
 }
 
 func TestWithPasswordOnly(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
 	if IsPasswordOnly(ctx) {
 		t.Errorf("Should be false")
@@ -32,38 +32,46 @@ func TestWithPasswordOnly(t *testing.T) {
 }
 
 func TestWithPrintQR(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
 	assert.False(t, IsPrintQR(ctx))
 	assert.True(t, IsPrintQR(WithPrintQR(ctx, true)))
 }
 
 func TestWithRevision(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
-	assert.Equal(t, "", GetRevision(ctx))
+	assert.Empty(t, GetRevision(ctx))
 	assert.Equal(t, "foo", GetRevision(WithRevision(ctx, "foo")))
 	assert.False(t, HasRevision(ctx))
 	assert.True(t, HasRevision(WithRevision(ctx, "foo")))
 }
 
 func TestWithKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
-	assert.Equal(t, "", GetKey(ctx))
+	assert.Empty(t, GetKey(ctx))
 	assert.Equal(t, "foo", GetKey(WithKey(ctx, "foo")))
 }
 
 func TestWithOnlyClip(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
 	assert.False(t, IsOnlyClip(ctx))
 	assert.True(t, IsOnlyClip(WithOnlyClip(ctx, true)))
 }
 
 func TestWithAlsoClip(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
 	assert.False(t, IsAlsoClip(ctx))
 	assert.True(t, IsAlsoClip(WithAlsoClip(ctx, true)))
+}
+
+func TestWithClipLine(t *testing.T) {
+	ctx := config.NewContextInMemory()
+
+	assert.Equal(t, -1, GetClipLine(ctx))
+	assert.Equal(t, 0, GetClipLine(WithClipLine(ctx, 0)))
+	assert.Equal(t, 2, GetClipLine(WithClipLine(ctx, 2)))
 }

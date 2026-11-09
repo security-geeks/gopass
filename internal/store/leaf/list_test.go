@@ -1,30 +1,23 @@
 package leaf
 
 import (
-	"bytes"
-	"context"
-	"os"
 	"testing"
 
-	plain "github.com/gopasspw/gopass/internal/backend/crypto/plain"
+	"github.com/gopasspw/gopass/internal/backend/crypto/plain"
 	"github.com/gopasspw/gopass/internal/backend/storage/fs"
-	"github.com/gopasspw/gopass/internal/out"
-	"github.com/gopasspw/gopass/pkg/ctxutil"
+	"github.com/gopasspw/gopass/internal/config"
+	"github.com/gopasspw/gopass/internal/recipients"
 	"github.com/gopasspw/gopass/pkg/gopass/secrets"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestList(t *testing.T) {
-	ctx := context.Background()
-	ctx = ctxutil.WithExportKeys(ctx, false)
+	t.Parallel()
 
-	obuf := &bytes.Buffer{}
-	out.Stdout = obuf
-	defer func() {
-		out.Stdout = os.Stdout
-	}()
+	ctx := config.NewContextInMemory()
+
+	ctx, stdout, _ := captureOutput(t, ctx)
 
 	for _, tc := range []struct {
 		name string
@@ -41,6 +34,7 @@ func TestList(t *testing.T) {
 			prep: func(s *Store) error {
 				sec := secrets.New()
 				sec.SetPassword("bar")
+
 				return s.Set(ctx, "foo", sec)
 			},
 			out: []string{"foo"},
@@ -55,6 +49,7 @@ func TestList(t *testing.T) {
 						return err
 					}
 				}
+
 				return nil
 			},
 			out: []string{"bar", "baz", "foo"},
@@ -69,35 +64,40 @@ func TestList(t *testing.T) {
 						return err
 					}
 				}
+
 				return nil
 			},
 			out: []string{"foo/bar", "foo/baz", "foo/zab"},
 		},
 	} {
-		// common setup
-		tempdir, err := os.MkdirTemp("", "gopass-")
-		require.NoError(t, err)
+		t.Run(tc.name, func(t *testing.T) {
+			// common setup
+			tempdir := t.TempDir()
 
-		s := &Store{
-			alias:   "",
-			path:    tempdir,
-			crypto:  plain.New(),
-			storage: fs.New(tempdir),
-		}
+			defer func() {
+				seekStart(t, stdout)
+			}()
 
-		assert.NoError(t, s.saveRecipients(ctx, []string{"john.doe"}, "test"))
+			s := &Store{
+				alias:   "",
+				path:    tempdir,
+				crypto:  plain.New(),
+				storage: fs.New(tempdir),
+			}
 
-		// prepare store
-		assert.NoError(t, tc.prep(s))
-		obuf.Reset()
+			rs := recipients.New()
+			rs.Add("john.doe")
 
-		// run test case
-		out, err := s.List(ctx, "")
-		require.NoError(t, err)
-		assert.Equal(t, tc.out, out)
-		obuf.Reset()
+			require.NoError(t, s.saveRecipients(ctx, rs, "test"))
 
-		// common tear down
-		_ = os.RemoveAll(tempdir)
+			// prepare store
+			require.NoError(t, tc.prep(s))
+			seekStart(t, stdout)
+
+			// run test case
+			out, err := s.List(ctx, "")
+			require.NoError(t, err)
+			assert.Equal(t, tc.out, out)
+		})
 	}
 }

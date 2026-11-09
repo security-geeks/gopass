@@ -2,29 +2,50 @@ package action
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/tests/gptest"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func TestBashEscape(t *testing.T) {
-	expected := `a\\<\\>\\|\\\\and\\ sometimes\\?\\*\\(\\)\\&\\;\\#`
-	if escaped := bashEscape(`a<>|\and sometimes?*()&;#`); escaped != expected {
-		t.Errorf("Expected %q, but got %q", expected, escaped)
-	}
+	t.Run("bash escape", func(t *testing.T) {
+		expected := `a\\<\\>\\|\\\\and\\ sometimes\\?\\*\\(\\)\\&\\;\\#`
+		if escaped := bashEscape(`a<>|\and sometimes?*()&;#`); escaped != expected {
+			t.Errorf("Expected %q, but got %q", expected, escaped)
+		}
+	})
+
+	t.Run("bash escape colon", func(t *testing.T) {
+		expected := `websites\\:github`
+		if escaped := bashEscape(`websites:github`); escaped != expected {
+			t.Errorf("Expected %q, but got %q", expected, escaped)
+		}
+	})
+
+	t.Run("bash escape single quote", func(t *testing.T) {
+		expected := `good\\ ol\'\\ days`
+		if escaped := bashEscape(`good ol' days`); escaped != expected {
+			t.Errorf("Expected %q, but got %q", expected, escaped)
+		}
+	})
+
+	t.Run("bash escape double quote", func(t *testing.T) {
+		expected := `my\\ \\\"bad\\\"\\ password`
+		if escaped := bashEscape(`my "bad" password`); escaped != expected {
+			t.Errorf("Expected %q, but got %q", expected, escaped)
+		}
+	})
 }
 
 func TestComplete(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
 	buf := &bytes.Buffer{}
 	out.Stdout = buf
@@ -34,13 +55,14 @@ func TestComplete(t *testing.T) {
 		stdout = os.Stdout
 	}()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithInteractive(ctx, false)
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
-	app := cli.NewApp()
+	app := &cli.Command{Name: "action.test"}
 	app.Commands = []*cli.Command{
 		{
 			Name:    "test",
@@ -51,38 +73,38 @@ func TestComplete(t *testing.T) {
 	t.Run("complete foo", func(t *testing.T) {
 		defer buf.Reset()
 
-		act.Complete(gptest.CliCtx(ctx, t))
+		act.Complete(ctx, gptest.CliCtx(ctx, t))
 		assert.Equal(t, "foo\n", buf.String())
 	})
 
 	t.Run("bash completion", func(t *testing.T) {
 		defer buf.Reset()
 
-		assert.NoError(t, act.CompletionBash(nil))
+		require.NoError(t, act.CompletionBash(ctx, nil))
 		assert.Contains(t, buf.String(), "action.test")
 	})
 
 	t.Run("fish completion", func(t *testing.T) {
 		defer buf.Reset()
 
-		assert.NoError(t, act.CompletionFish(app))
+		require.NoError(t, act.CompletionFish(app))
 		assert.Contains(t, buf.String(), "action.test")
-		assert.Error(t, act.CompletionFish(nil))
+		require.Error(t, act.CompletionFish(nil))
 	})
 
 	t.Run("zsh completion", func(t *testing.T) {
 		defer buf.Reset()
 
-		assert.NoError(t, act.CompletionZSH(app))
+		require.NoError(t, act.CompletionZSH(app))
 		assert.Contains(t, buf.String(), "action.test")
-		assert.Error(t, act.CompletionZSH(nil))
+		require.Error(t, act.CompletionZSH(nil))
 	})
 
 	t.Run("openbsdksh completion", func(t *testing.T) {
 		defer buf.Reset()
 
-		assert.NoError(t, act.CompletionOpenBSDKsh(app))
+		require.NoError(t, act.CompletionOpenBSDKsh(app))
 		assert.Contains(t, buf.String(), "complete_gopass")
-		assert.Error(t, act.CompletionOpenBSDKsh(nil))
+		require.Error(t, act.CompletionOpenBSDKsh(nil))
 	})
 }

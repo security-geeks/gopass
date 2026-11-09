@@ -21,13 +21,14 @@ func TestSingleMount(t *testing.T) {
 	require.NoError(t, err)
 
 	out, err = ts.run("mounts")
-	assert.NoError(t, err)
+	require.NoError(t, err)
+
 	want := "gopass (" + ts.storeDir("root") + ")\n"
 	want += "└── mnt/\n    └── m1 (" + ts.storeDir("m1") + ")"
 	assert.Equal(t, strings.TrimSpace(want), out)
 
 	out, err = ts.run("show mnt/m1/secret")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, out, "entry is not in the password store")
 
 	ts.initSecrets("mnt/m1/")
@@ -52,7 +53,7 @@ gopass
 	list = fmt.Sprintf(list, ts.storeDir("m1"))
 
 	out, err = ts.run("list")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, strings.TrimSpace(list), out)
 }
 
@@ -67,8 +68,8 @@ func TestMountShadowing(t *testing.T) {
 	_, err := ts.runCmd([]string{ts.Binary, "insert", "mnt/m1/secret"}, []byte("moar"))
 	require.NoError(t, err)
 
-	out, err := ts.run("show -f mnt/m1/secret")
-	assert.NoError(t, err)
+	out, err := ts.run("show -u mnt/m1/secret")
+	require.NoError(t, err)
 	assert.Equal(t, "moar", out)
 
 	out, err = ts.run("init --store mnt/m1 --path " + ts.storeDir("m1") + " --storage=fs " + keyID)
@@ -77,14 +78,15 @@ func TestMountShadowing(t *testing.T) {
 
 	// check the mount is there
 	out, err = ts.run("mounts")
-	assert.NoError(t, err)
+	require.NoError(t, err)
+
 	want := "gopass (" + ts.storeDir("root") + ")\n"
 	want += "└── mnt/\n    └── m1 (" + ts.storeDir("m1") + ")"
 	assert.Equal(t, strings.TrimSpace(want), out)
 
 	// check that the mount is not containing our shadowed secret
-	out, err = ts.run("show -f mnt/m1/secret")
-	assert.Error(t, err)
+	out, err = ts.run("show -u mnt/m1/secret")
+	require.Error(t, err)
 	assert.Contains(t, out, "entry is not in the password store")
 
 	// insert some secret at the place that is shadowed by the mount
@@ -92,8 +94,8 @@ func TestMountShadowing(t *testing.T) {
 	require.NoError(t, err)
 
 	// check that the mount is containing our new secret shadowing the old one
-	out, err = ts.run("show -f mnt/m1/secret")
-	assert.NoError(t, err)
+	out, err = ts.run("show -u mnt/m1/secret")
+	require.NoError(t, err)
 	assert.Equal(t, "food", out)
 
 	// add more secrets
@@ -121,12 +123,12 @@ gopass
 	list = fmt.Sprintf(list, ts.storeDir("m1"))
 
 	out, err = ts.run("list")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, strings.TrimSpace(list), out)
 
 	// check that unmounting works:
 	_, err = ts.run("mounts rm mnt/m1")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	list = `
 gopass
@@ -142,11 +144,11 @@ gopass
 `
 
 	out, err = ts.run("list")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, strings.TrimSpace(list), out)
 
 	out, err = ts.run("show -o mnt/m1/secret")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "moar", out)
 }
 
@@ -184,7 +186,7 @@ gopass
 	list = fmt.Sprintf(list, ts.storeDir("m1"))
 
 	out, err = ts.run("list")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, strings.TrimSpace(list), out)
 
 	// mount m2
@@ -221,6 +223,6 @@ gopass
 	list = fmt.Sprintf(list, ts.storeDir("m1"), ts.storeDir("m2"))
 
 	out, err = ts.run("list")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, strings.TrimSpace(list), out)
 }

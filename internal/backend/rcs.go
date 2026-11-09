@@ -8,12 +8,16 @@ import (
 	"github.com/gopasspw/gopass/pkg/debug"
 )
 
-// rcs is a revision control backend
+// rcs is a revision control backend.
 type rcs interface {
 	Add(ctx context.Context, args ...string) error
 	Commit(ctx context.Context, msg string) error
 	Push(ctx context.Context, remote, location string) error
 	Pull(ctx context.Context, remote, location string) error
+
+	TryAdd(ctx context.Context, args ...string) error
+	TryCommit(ctx context.Context, msg string) error
+	TryPush(ctx context.Context, remote, location string) error
 
 	InitConfig(ctx context.Context, name, email string) error
 	AddRemote(ctx context.Context, remote, location string) error
@@ -26,7 +30,7 @@ type rcs interface {
 	Compact(ctx context.Context) error
 }
 
-// Revision is a SCM revision
+// Revision is a SCM revision.
 type Revision struct {
 	Hash        string
 	AuthorName  string
@@ -36,7 +40,7 @@ type Revision struct {
 	Body        string
 }
 
-// Revisions implements the sort interface
+// Revisions implements the sort interface.
 type Revisions []Revision
 
 func (r Revisions) Len() int {
@@ -53,9 +57,11 @@ func (r Revisions) Swap(i, j int) {
 
 // Clone clones an existing repository from a remote.
 func Clone(ctx context.Context, id StorageBackend, repo, path string) (Storage, error) {
-	if be, found := storageRegistry[id]; found {
+	if be, err := StorageRegistry.Get(id); err == nil {
 		debug.Log("Cloning with %s", be.String())
+
 		return be.Clone(ctx, repo, path)
 	}
+
 	return nil, fmt.Errorf("unknown backend %d: %w", id, ErrNotFound)
 }

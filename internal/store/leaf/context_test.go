@@ -4,11 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestFsckCheck(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
 
 	assert.False(t, IsFsckCheck(ctx))
 	assert.True(t, IsFsckCheck(WithFsckCheck(ctx, true)))
@@ -17,7 +20,9 @@ func TestFsckCheck(t *testing.T) {
 }
 
 func TestFsckForce(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
 
 	assert.False(t, IsFsckForce(ctx))
 	assert.True(t, IsFsckForce(WithFsckForce(ctx, true)))
@@ -26,7 +31,9 @@ func TestFsckForce(t *testing.T) {
 }
 
 func TestFsckFunc(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
 
 	ffunc := func(context.Context, string) bool {
 		return true
@@ -35,13 +42,4 @@ func TestFsckFunc(t *testing.T) {
 	assert.True(t, GetFsckFunc(ctx)(ctx, ""))
 	assert.True(t, GetFsckFunc(WithFsckFunc(ctx, ffunc))(ctx, ""))
 	assert.True(t, HasFsckFunc(WithFsckFunc(ctx, ffunc)))
-}
-
-func TestCheckRecipients(t *testing.T) {
-	ctx := context.Background()
-
-	assert.False(t, IsCheckRecipients(ctx))
-	assert.True(t, IsCheckRecipients(WithCheckRecipients(ctx, true)))
-	assert.False(t, IsCheckRecipients(WithCheckRecipients(ctx, false)))
-	assert.True(t, HasCheckRecipients(WithCheckRecipients(ctx, true)))
 }

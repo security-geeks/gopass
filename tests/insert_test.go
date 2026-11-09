@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInsert(t *testing.T) {
@@ -14,30 +15,30 @@ func TestInsert(t *testing.T) {
 	ts.initStore()
 
 	out, err := ts.run("insert")
-	assert.Error(t, err)
-	assert.Equal(t, "\nError: Usage: "+filepath.Base(ts.Binary)+" insert name\n", out)
+	require.Error(t, err)
+	assert.Equal(t, "Usage: "+filepath.Base(ts.Binary)+" insert name\n", out)
 
 	_, err = ts.runCmd([]string{ts.Binary, "insert", "some/secret"}, []byte("moar"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	_, err = ts.runCmd([]string{ts.Binary, "insert", "some/newsecret"}, []byte("and\nmoar"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	t.Run("Regression test for #1573 without actual pipes", func(t *testing.T) {
-		out, err = ts.run("show -f some/secret")
-		assert.NoError(t, err)
+		out, err = ts.run("show -u some/secret")
+		require.NoError(t, err)
 		assert.Equal(t, "moar", out)
 
-		out, err = ts.run("show -f some/newsecret")
-		assert.NoError(t, err)
+		out, err = ts.run("show -u some/newsecret")
+		require.NoError(t, err)
 		assert.Equal(t, "and\nmoar", out)
 
-		out, err = ts.run("show -f some/secret")
-		assert.NoError(t, err)
+		out, err = ts.run("show -u some/secret")
+		require.NoError(t, err)
 		assert.Equal(t, "moar", out)
 
-		out, err = ts.run("show -f some/newsecret")
-		assert.NoError(t, err)
+		out, err = ts.run("show -u some/newsecret")
+		require.NoError(t, err)
 		assert.Equal(t, "and\nmoar", out)
 	})
 
@@ -45,58 +46,58 @@ func TestInsert(t *testing.T) {
 		t.Skip("TODO")
 
 		_, err = ts.runCmd([]string{ts.Binary, "insert", "some/other"}, []byte("nope"))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		out, err = ts.run("insert some/other")
-		assert.Error(t, err)
-		assert.Equal(t, "\nError: not overwriting your current secret\n", out)
+		require.Error(t, err)
+		assert.Equal(t, "not overwriting your current secret\n", out)
 
 		out, err = ts.run("show -o some/other")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "nope", out)
 
 		out, err = ts.run("--yes insert some/other")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "Warning: Password is empty or all whitespace", out)
 
 		out, err = ts.run("insert -f some/other")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "Warning: Password is empty or all whitespace", out)
 
 		out, err = ts.run("show -o some/other")
-		assert.Error(t, err)
-		assert.Equal(t, "\nError: empty secret\n", out)
+		require.Error(t, err)
+		assert.Equal(t, "empty secret\n", out)
 
 		_, err = ts.runCmd([]string{ts.Binary, "insert", "-f", "some/other"}, []byte("final"))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		out, err = ts.run("show -o some/other")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "final", out)
 
 		// This is arguably not a good behaviour: it should not overwrite the password when we are only working on a key:value.
 		out, err = ts.run("insert -f some/other test:inline")
-		assert.NoError(t, err)
-		assert.Equal(t, "", out)
+		require.NoError(t, err)
+		assert.Empty(t, out)
 
 		out, err = ts.run("show some/other test")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "inline", out)
 
 		out, err = ts.run("insert some/other test:inline2")
-		assert.Error(t, err)
-		assert.Equal(t, "\nError: not overwriting your current secret\n", out)
+		require.Error(t, err)
+		assert.Equal(t, "not overwriting your current secret\n", out)
 
 		out, err = ts.run("show some/other Test")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "inline", out)
 
 		out, err = ts.run("--yes insert some/other test:inline2")
-		assert.NoError(t, err)
-		assert.Equal(t, "", out)
+		require.NoError(t, err)
+		assert.Empty(t, out)
 
 		out, err = ts.run("show some/other Test")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "inline2", out)
 	})
 
@@ -124,12 +125,12 @@ glossary": {
     }
 }`
 		_, err = ts.runCmd([]string{ts.Binary, "insert", "some/json"}, []byte(json))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// using show -n to disable parsing
-		out, err = ts.run("show -f -n some/json")
-		assert.NoError(t, err)
-		assert.Equal(t, json, out)
+		out, err = ts.run("show -u -n some/json")
+		require.NoError(t, err)
+		assert.Equal(t, json, out) //nolint:testifylint
 	})
 
 	t.Run("Regression test for #1600", func(t *testing.T) {
@@ -139,11 +140,11 @@ test2
   "Creator": "the creator"
 }`
 		_, err = ts.runCmd([]string{ts.Binary, "insert", "some/multilinewithbraces"}, []byte(input))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// using show -n to disable parsing
-		out, err = ts.run("show -f -n some/multilinewithbraces")
-		assert.NoError(t, err)
+		out, err = ts.run("show -u -n some/multilinewithbraces")
+		require.NoError(t, err)
 		assert.Equal(t, input, out)
 	})
 
@@ -154,11 +155,11 @@ web: test.com
 user: second user`
 
 		_, err = ts.runCmd([]string{ts.Binary, "insert", "some/multikey"}, []byte(input))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// using show -n to disable parsing
-		out, err = ts.run("show -f -n some/multikey")
-		assert.NoError(t, err)
+		out, err = ts.run("show -u -n some/multikey")
+		require.NoError(t, err)
 		assert.Equal(t, input, out)
 	})
 
@@ -176,11 +177,10 @@ user: a user
 user: second user`
 
 		_, err = ts.runCmd([]string{ts.Binary, "insert", "some/multikeyvalues"}, []byte(input))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
-		// using show -n to disable parsing
-		out, err = ts.run("show -f some/multikeyvalues")
-		assert.NoError(t, err)
+		out, err = ts.run("show -u some/multikeyvalues")
+		require.NoError(t, err)
 		assert.Equal(t, output, out)
 	})
 
@@ -194,16 +194,16 @@ user: 0123`
 user: 83`
 
 		_, err = ts.runCmd([]string{ts.Binary, "insert", "some/yamloctal"}, []byte(input))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// with parsing we have 0123 interpreted as octal for 83
-		out, err = ts.run("show -f some/yamloctal")
-		assert.NoError(t, err)
+		out, err = ts.run("show -u some/yamloctal")
+		require.NoError(t, err)
 		assert.Equal(t, output, out)
 
 		// using show -n to disable parsing
-		out, err = ts.run("show -f -n some/yamloctal")
-		assert.NoError(t, err)
+		out, err = ts.run("show -u -n some/yamloctal")
+		require.NoError(t, err)
 		assert.Equal(t, input, out)
 	})
 
@@ -213,18 +213,19 @@ user: 83`
 Test / test.com
 user:myuser
 url: test.com/`
-		output := `somepasswd
-url: test.com/
-user: myuser
----
-Test / test.com`
 
 		_, err = ts.runCmd([]string{ts.Binary, "insert", "some/kvwithspace"}, []byte(input))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
-		out, err = ts.run("show -f some/kvwithspace")
-		assert.NoError(t, err)
-		assert.Equal(t, output, out)
+		out, err = ts.run("show -u some/kvwithspace")
+		require.NoError(t, err)
+		assert.Equal(t, input, out)
+
+		out, err = ts.run("show -u some/kvwithspace url")
+		require.NoError(t, err)
+		assert.Equal(t, "test.com/", out)
+
+		out, err = ts.run("show -u some/kvwithspace user")
+		require.Error(t, err)
 	})
-
 }

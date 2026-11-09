@@ -2,31 +2,27 @@ package action
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"testing"
 
+	_ "github.com/gopasspw/gopass/internal/backend/crypto"
+	_ "github.com/gopasspw/gopass/internal/backend/storage"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/tests/gptest"
-
-	_ "github.com/gopasspw/gopass/internal/backend/crypto"
-	_ "github.com/gopasspw/gopass/internal/backend/storage"
-
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func TestVersion(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithInteractive(ctx, false)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 
 	buf := &bytes.Buffer{}
@@ -37,11 +33,11 @@ func TestVersion(t *testing.T) {
 		stdout = os.Stdout
 	}()
 
-	cli.VersionPrinter = func(*cli.Context) {
+	cli.VersionPrinter = func(*cli.Command) {
 		out.Printf(ctx, "gopass version 0.0.0-test")
 	}
 
 	t.Run("print fixed version", func(t *testing.T) {
-		assert.NoError(t, act.Version(gptest.CliCtx(ctx, t)))
+		require.NoError(t, act.Version(ctx, gptest.CliCtx(ctx, t)))
 	})
 }

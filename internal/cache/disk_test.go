@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"os"
 	"testing"
 	"time"
 
@@ -10,24 +9,37 @@ import (
 )
 
 func TestOnDisk(t *testing.T) {
-	td, err := os.MkdirTemp("", "gopass-")
+	t.Parallel()
+
+	td := t.TempDir()
+
+	odc, err := NewOnDiskWithDir("test", td, time.Hour)
 	require.NoError(t, err)
 
-	defer func() {
-		_ = os.RemoveAll(td)
-	}()
-
-	ogh := os.Getenv("GOPASS_HOMEDIR")
-	os.Setenv("GOPASS_HOMEDIR", td)
-	defer func() {
-		os.Setenv("GOPASS_HOMEDIR", ogh)
-	}()
-
-	odc, err := NewOnDisk("test", time.Hour)
-	assert.NoError(t, err)
-
-	assert.NoError(t, odc.Set("foo", []string{"bar"}))
+	require.NoError(t, odc.Set("foo", []string{"bar"}))
 	res, err := odc.Get("foo")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []string{"bar"}, res)
+
+	require.Error(t, odc.Remove("bar"))
+	require.NoError(t, odc.Remove("foo"))
+	require.NoError(t, odc.Purge())
+}
+
+func TestOnDiskExpiry(t *testing.T) {
+	t.Parallel()
+
+	td := t.TempDir()
+
+	odc, err := NewOnDiskWithDir("test", td, time.Second)
+	require.NoError(t, err)
+	require.NoError(t, odc.Set("foo", []string{"bar"}))
+	res, err := odc.Get("foo")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"bar"}, res)
+
+	time.Sleep(time.Second + 100*time.Millisecond)
+	res, err = odc.Get("foo")
+	require.Error(t, err)
+	assert.NotEqual(t, []string{"bar"}, res)
 }

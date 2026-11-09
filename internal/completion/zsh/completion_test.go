@@ -1,12 +1,11 @@
 package zsh
 
 import (
-	"flag"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 type unknownFlag struct{}
@@ -15,20 +14,37 @@ func (u *unknownFlag) String() string {
 	return ""
 }
 
-func (u *unknownFlag) Apply(*flag.FlagSet) error {
+func (u *unknownFlag) Get() any {
 	return nil
 }
+
+func (u *unknownFlag) PreParse() error {
+	return nil
+}
+
+func (u *unknownFlag) PostParse() error {
+	return nil
+}
+
+func (u *unknownFlag) Set(string, string) error {
+	return nil
+}
+
 func (u *unknownFlag) GetName() string {
 	return ""
 }
+
 func (u *unknownFlag) IsSet() bool {
 	return true
 }
+
 func (u *unknownFlag) Names() []string {
 	return []string{}
 }
 
 func TestFormatFlag(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name  string
 		usage string
@@ -36,28 +52,35 @@ func TestFormatFlag(t *testing.T) {
 	}{
 		{"print, p", "Print", "--print[Print]"},
 	} {
-		assert.Equal(t, tc.out, formatFlag(tc.name, tc.usage))
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.out, formatFlag(tc.name, tc.usage))
+		})
 	}
 }
 
 func TestGetCompletion(t *testing.T) {
-	app := cli.NewApp()
+	t.Parallel()
+
+	app := &cli.Command{Name: "zsh.test"}
 	sv, err := GetCompletion(app)
 	require.NoError(t, err)
 	assert.Contains(t, sv, "#compdef zsh.test")
 
 	zshTemplate = "{{.unexported}}"
 	sv, err = GetCompletion(app)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, sv, "")
 
 	zshTemplate = "{{}}"
 	sv, err = GetCompletion(app)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, sv, "")
 }
 
 func TestFormatflagFunc(t *testing.T) {
+	t.Parallel()
+
 	ff := formatFlagFunc()
 	for _, flag := range []cli.Flag{
 		&cli.BoolFlag{Name: "foo", Usage: "bar"},
@@ -76,7 +99,8 @@ func TestFormatflagFunc(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "--foo[bar]", sv)
 	}
+
 	sv, err := ff(&unknownFlag{})
-	assert.Error(t, err)
-	assert.Equal(t, "", sv)
+	require.Error(t, err)
+	assert.Empty(t, sv)
 }

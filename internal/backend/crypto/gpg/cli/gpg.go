@@ -3,100 +3,169 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/gopasspw/gopass/internal/backend/crypto/gpg"
+	"github.com/gopasspw/gopass/internal/backend/crypto/gpg/gpgconf"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/pkg/debug"
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 var (
 	// defaultArgs contains the default GPG args for non-interactive use. Note: Do not use '--batch'
 	// as this will disable (necessary) passphrase questions!
 	defaultArgs = []string{"--quiet", "--yes", "--compress-algo=none", "--no-encrypt-to", "--no-auto-check-trustdb"}
-	// Ext is the file extension used by this backend
+	// Ext is the file extension used by this backend.
 	Ext = "gpg"
-	// IDFile is the name of the recipients file used by this backend
+	// IDFile is the name of the recipients file used by this backend.
 	IDFile = ".gpg-id"
+	// Name is the name of this backend.
+	Name = "gpg"
+	// Timeout is the time allow for gpg invocations to complete.
+	Timeout = time.Minute
 )
 
-// GPG is a gpg wrapper
+// GPG is a gpg wrapper.
 type GPG struct {
 	binary    string
 	args      []string
 	pubKeys   gpg.KeyList
 	privKeys  gpg.KeyList
-	listCache *lru.TwoQueueCache
+	listCache *lru.TwoQueueCache[string, gpg.KeyList]
 	throwKids bool
 }
 
-// Config is the gpg wrapper config
+// timeoutFromContext returns the maximum duration a gpg invocation may take.
+// It defaults to Timeout and can be overridden with the gpg.timeout config
+// option, in seconds. A value of zero (or less) disables the deadline, so
+// slow passphrase entry is never cut short.
+func timeoutFromContext(ctx context.Context) time.Duration {
+	secs := config.AsIntWithDefault(config.String(ctx, "gpg.timeout"), int(Timeout/time.Second))
+	if secs <= 0 {
+		return 0
+	}
+
+	return time.Duration(secs) * time.Second
+}
+
+// withTimeout bounds the given context by the configured gpg.timeout. A zero
+// timeout leaves the context without its own deadline.
+func withTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+
+	return context.WithTimeout(ctx, timeout)
+}
+
+// Config is the gpg wrapper config.
 type Config struct {
 	Binary string
 	Args   []string
 	Umask  int
 }
 
-// New creates a new GPG wrapper
+// New creates a new GPG wrapper.
 func New(ctx context.Context, cfg Config) (*GPG, error) {
 	// ensure created files don't have group or world perms set
 	// this setting should be inherited by sub-processes
-	umask(cfg.Umask)
+	gpgconf.Umask(cfg.Umask)
 
 	// make sure GPG_TTY is set (if possible)
 	if gt := os.Getenv("GPG_TTY"); gt == "" {
-		if t := tty(); t != "" {
+		if t := gpgconf.TTY(); t != "" {
 			_ = os.Setenv("GPG_TTY", t)
 		}
 	}
 
-	gcfg, err := gpgConfig()
+	gcfg, err := gpgconf.Config()
 	if err != nil {
 		debug.Log("failed to read GPG config: %s", err)
 	}
-	_, throwKids := gcfg["throw-keyids"]
+	_, hasThrowKids := gcfg["throw-keyids"]
 
 	g := &GPG{
 		binary:    "gpg",
 		args:      append(defaultArgs, cfg.Args...),
-		throwKids: throwKids,
+		throwKids: hasThrowKids,
 	}
 
-	debug.Log("initializing LRU cache")
-	cache, err := lru.New2Q(1024)
+	cache, err := lru.New2Q[string, gpg.KeyList](1024)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to initialize the LRU cache: %w", err)
 	}
 	g.listCache = cache
-	debug.Log("LRU cache initialized")
 
-	debug.Log("detecting binary")
-	bin, err := Binary(ctx, cfg.Binary)
+	bin, err := gpgconf.Binary(ctx, cfg.Binary)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to detect binary: %w", err)
 	}
+
 	g.binary = bin
-	debug.Log("binary detected")
+	debug.Log("binary detected as %s", bin)
 
 	return g, nil
 }
 
-// Initialized always returns nil
+// Initialized always returns nil.
 func (g *GPG) Initialized(ctx context.Context) error {
 	return nil
 }
 
-// Name returns gpg
+// Name returns gpg.
 func (g *GPG) Name() string {
-	return "gpg"
+	return Name
 }
 
-// Ext returns gpg
+// Ext returns gpg.
 func (g *GPG) Ext() string {
 	return Ext
 }
 
-// IDFile returns .gpg-id
+// IDFile returns .gpg-id.
 func (g *GPG) IDFile() string {
 	return IDFile
+}
+
+// Concurrency returns 1 to avoid concurrency issues
+// with many GPG setups.
+func (g *GPG) Concurrency() int {
+	return 1
+}
+
+// NeedsPublicKeyImport returns true because GPG manages public keys in a
+// local keyring that must be populated by importing keys.
+func (g *GPG) NeedsPublicKeyImport() bool {
+	return true
+}
+
+// Binary returns the GPG binary location.
+func (g *GPG) Binary() string {
+	if g == nil {
+		return ""
+	}
+
+	return g.binary
+}
+
+// String implements fmt.Stringer.
+func (g *GPG) String() string {
+	var sb strings.Builder
+	sb.WriteString("gpgcli(")
+	if g == nil {
+		sb.WriteString("<nil>)")
+
+		return sb.String()
+	}
+	sb.WriteString("binary:")
+	sb.WriteString(g.binary)
+	sb.WriteString(",args: [")
+	sb.WriteString(strings.Join(g.args, " "))
+	sb.WriteString("])")
+
+	return sb.String()
 }

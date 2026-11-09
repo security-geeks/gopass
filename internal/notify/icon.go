@@ -3,25 +3,35 @@ package notify
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/pkg/appdir"
 	"github.com/gopasspw/gopass/pkg/fsutil"
 )
 
-func iconURI() string {
+const maxIconAssetSize int64 = 32 << 20
+
+func iconURI(ctx context.Context) string {
+	if config.Bool(ctx, "notify.disable-icon") {
+		return ""
+	}
+
 	userCache := appdir.UserCache()
 	if !fsutil.IsDir(userCache) {
-		if err := os.MkdirAll(userCache, 0755); err != nil {
+		if err := os.MkdirAll(userCache, 0o755); err != nil {
 			return ""
 		}
 	}
 
 	iconFN := filepath.Join(userCache, "gopass-logo-small.png")
 	if !fsutil.IsFile(iconFN) {
-		fh, err := os.OpenFile(iconFN, os.O_WRONLY|os.O_CREATE, 0644)
+		fh, err := os.OpenFile(iconFN, os.O_WRONLY|os.O_CREATE, 0o644)
 		if err != nil {
 			return ""
 		}
@@ -30,8 +40,11 @@ func iconURI() string {
 		}()
 
 		if err = bindataWrite(assetLogoSmallPng(), fh); err != nil {
+			_ = os.Remove(iconFN)
+
 			return ""
 		}
+
 		if err = fh.Close(); err != nil {
 			return ""
 		}
@@ -40,6 +53,7 @@ func iconURI() string {
 	if fsutil.IsFile(iconFN) {
 		return "file://" + iconFN
 	}
+
 	return ""
 }
 
@@ -52,8 +66,15 @@ func bindataWrite(in []byte, out io.Writer) error {
 		_ = gz.Close()
 	}()
 
-	_, err = io.Copy(out, gz)
-	return err
+	n, err := io.CopyN(out, gz, maxIconAssetSize+1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if n > maxIconAssetSize {
+		return fmt.Errorf("embedded icon too large: exceeds %d bytes", maxIconAssetSize)
+	}
+
+	return nil
 }
 
 func assetLogoSmallPng() []byte {

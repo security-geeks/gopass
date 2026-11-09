@@ -3,35 +3,36 @@ package action
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/fatih/color"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/gopass/secrets"
 	"github.com/gopasspw/gopass/tests/gptest"
-	"github.com/urfave/cli/v2"
-
-	"github.com/fatih/color"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
 func TestFind(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithTerminal(ctx, false)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
-	act.cfg.AutoClip = false
+	require.NoError(t, act.cfg.Set("", "generate.autoclip", "false"))
 
 	buf := &bytes.Buffer{}
 	out.Stdout = buf
@@ -49,75 +50,106 @@ func TestFind(t *testing.T) {
 
 	// find
 	c := gptest.CliCtx(ctx, t)
-	if err := act.Find(c); err == nil || err.Error() != fmt.Sprintf("Usage: %s find <NEEDLE>", actName) {
+	if err := act.FindFuzzy(ctx, c); err == nil || err.Error() != fmt.Sprintf("Usage: %s find <pattern>", actName) {
 		t.Errorf("Should fail: %s", err)
 	}
 
-	// find fo
+	// find fo (with fuzzy search)
 	c = gptest.CliCtxWithFlags(ctx, t, nil, "fo")
-	assert.NoError(t, act.Find(c))
+	require.NoError(t, act.FindFuzzy(ctx, c))
 	assert.Contains(t, strings.TrimSpace(buf.String()), "Found exact match in \"foo\"\nsecret")
 	buf.Reset()
 
 	// find fo (no fuzzy search)
 	c = gptest.CliCtxWithFlags(ctx, t, nil, "fo")
-	assert.NoError(t, act.FindNoFuzzy(c))
-	assert.Equal(t, strings.TrimSpace(buf.String()), "foo")
+	require.NoError(t, act.Find(ctx, c))
+	assert.Equal(t, "foo", strings.TrimSpace(buf.String()))
 	buf.Reset()
 
 	// testing the safecontent case
-	ctx = ctxutil.WithShowSafeContent(ctx, true)
-	c.Context = ctx
-	assert.NoError(t, act.Find(c))
+	require.NoError(t, act.cfg.Set("", "show.safecontent", "true"))
+	require.NoError(t, act.FindFuzzy(ctx, c))
 	buf.Reset()
 
 	// testing with the clip flag set
 	c = gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "true"}, "fo")
-	assert.NoError(t, act.Find(c))
+	require.NoError(t, act.FindFuzzy(ctx, c))
 	out := strings.TrimSpace(buf.String())
 	assert.Contains(t, out, "Found exact match in \"foo\"")
 	buf.Reset()
 
 	// safecontent case with force flag set
 	c = gptest.CliCtxWithFlags(ctx, t, map[string]string{"unsafe": "true"}, "fo")
-	assert.NoError(t, act.Find(c))
+	require.NoError(t, act.FindFuzzy(ctx, c))
 	out = strings.TrimSpace(buf.String())
 	assert.Contains(t, out, "Found exact match in \"foo\"\nsecret")
 	buf.Reset()
 
 	// stopping with the safecontent tests
-	ctx = ctxutil.WithShowSafeContent(ctx, false)
+	require.NoError(t, act.cfg.Set("", "show.safecontent", "false"))
 
 	// find yo
 	c = gptest.CliCtx(ctx, t, "yo")
-	assert.Error(t, act.Find(c))
+	require.Error(t, act.FindFuzzy(ctx, c))
 	buf.Reset()
 
 	// add some secrets
-	sec := &secrets.Plain{}
+	sec := secrets.NewAKV()
 	sec.SetPassword("foo")
-	sec.WriteString("bar")
-	assert.NoError(t, act.Store.Set(ctx, "bar/baz", sec))
-	assert.NoError(t, act.Store.Set(ctx, "bar/zab", sec))
+	_, err = sec.Write([]byte("bar"))
+	require.NoError(t, err)
+	require.NoError(t, act.Store.Set(ctx, "bar/baz", sec))
+	require.NoError(t, act.Store.Set(ctx, "bar/zab", sec))
 	buf.Reset()
 
 	// find bar
 	c = gptest.CliCtx(ctx, t, "bar")
-	assert.NoError(t, act.Find(c))
+	require.NoError(t, act.FindFuzzy(ctx, c))
 	assert.Equal(t, "bar/baz\nbar/zab", strings.TrimSpace(buf.String()))
 	buf.Reset()
 
 	// find w/o callback
 	c = gptest.CliCtx(ctx, t)
-	assert.NoError(t, act.find(ctx, c, "foo", nil, false))
+	require.NoError(t, act.find(ctx, c, "foo", nil, false))
 	assert.Equal(t, "foo", strings.TrimSpace(buf.String()))
 	buf.Reset()
 
 	// findSelection w/o callback
 	c = gptest.CliCtx(ctx, t)
-	assert.Error(t, act.findSelection(ctx, c, []string{"foo", "bar"}, "fo", nil))
+	require.Error(t, act.findSelection(ctx, c, []string{"foo", "bar"}, "fo", nil))
 
 	// findSelection w/o options
 	c = gptest.CliCtx(ctx, t)
-	assert.Error(t, act.findSelection(ctx, c, nil, "fo", func(_ context.Context, _ *cli.Context, _ string, _ bool) error { return nil }))
+	require.Error(t, act.findSelection(ctx, c, nil, "fo", func(_ context.Context, _ *cli.Command, _ string, _ bool) error { return nil }))
+
+	// Test regex matching
+	// Add a secret with a pattern that can be matched by a regex
+	require.NoError(t, act.Store.Set(ctx, "test/regex123", sec))
+	require.NoError(t, act.Store.Set(ctx, "test/no-match", sec))
+	buf.Reset()
+
+	// find using regex pattern
+	c = gptest.CliCtxWithFlags(ctx, t, map[string]string{"regex": "true"}, "regex.*")
+	require.NoError(t, act.Find(ctx, c))
+	assert.Equal(t, "test/regex123", strings.TrimSpace(buf.String()))
+	buf.Reset()
+
+	// find using regex pattern with no match
+	c = gptest.CliCtxWithFlags(ctx, t, map[string]string{"regex": "true"}, "nomatch.*")
+	require.Error(t, act.Find(ctx, c))
+	buf.Reset()
+
+	// find --json with multiple matches
+	c = gptest.CliCtxWithFlags(ctx, t, map[string]string{"json": "true"}, "bar")
+	require.NoError(t, act.Find(ctx, c))
+	var jsonOut []string
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &jsonOut))
+	assert.Contains(t, jsonOut, "bar/baz")
+	assert.Contains(t, jsonOut, "bar/zab")
+	buf.Reset()
+
+	// find --json with no match returns error
+	c = gptest.CliCtxWithFlags(ctx, t, map[string]string{"json": "true"}, "zzznomatch")
+	require.Error(t, act.Find(ctx, c))
+	buf.Reset()
 }

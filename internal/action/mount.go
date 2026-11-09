@@ -1,47 +1,49 @@
 package action
 
 import (
-	"fmt"
-	"sort"
-
+	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
+	"sort"
+	"strings"
 
-	"github.com/gopasspw/gopass/internal/config"
+	"github.com/blang/semver/v4"
+	"github.com/fatih/color"
+	"github.com/gopasspw/gopass/internal/action/exit"
+	"github.com/gopasspw/gopass/internal/backend"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/internal/store"
 	"github.com/gopasspw/gopass/internal/store/root"
 	"github.com/gopasspw/gopass/internal/tree"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/debug"
-
-	"github.com/fatih/color"
-	"github.com/urfave/cli/v2"
+	"github.com/gopasspw/gopass/pkg/set"
+	"github.com/urfave/cli/v3"
 )
 
-// MountRemove removes an existing mount
-func (s *Action) MountRemove(c *cli.Context) error {
-	ctx := ctxutil.WithGlobalFlags(c)
-	if c.Args().Len() != 1 {
-		return ExitError(ExitUsage, nil, "Usage: %s mount remove [alias]", s.Name)
+// MountRemove removes an existing mount.
+func (s *mountHandler) MountRemove(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+	if cmd.Args().Len() != 1 {
+		return exit.Error(exit.Usage, nil, "Usage: %s mount remove [alias]", s.Name)
 	}
 
-	if err := s.Store.RemoveMount(ctx, c.Args().Get(0)); err != nil {
+	if err := s.Store.RemoveMount(ctx, cmd.Args().Get(0)); err != nil {
 		out.Errorf(ctx, "Failed to remove mount: %s", err)
 	}
 
-	if err := s.cfg.Save(); err != nil {
-		return ExitError(ExitConfig, err, "failed to write config: %s", err)
-	}
+	out.Printf(ctx, "Password Store %s umounted", cmd.Args().Get(0))
 
-	out.Printf(ctx, "Password Store %s umounted", c.Args().Get(0))
 	return nil
 }
 
-// MountsPrint prints all existing mounts
-func (s *Action) MountsPrint(c *cli.Context) error {
-	ctx := ctxutil.WithGlobalFlags(c)
+// MountsPrint prints all existing mounts.
+func (s *mountHandler) MountsPrint(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
 	if len(s.Store.Mounts()) < 1 {
 		out.Printf(ctx, "No mounts")
+
 		return nil
 	}
 
@@ -58,51 +60,100 @@ func (s *Action) MountsPrint(c *cli.Context) error {
 	debug.Log("MountsPrint - %+v - %+v", mounts, mps)
 
 	fmt.Fprintln(stdout, root.Format(tree.INF))
+
 	return nil
 }
 
 // MountsComplete will print a list of existings mount points for bash
-// completion
-func (s *Action) MountsComplete(*cli.Context) {
+// completion.
+func (s *mountHandler) MountsComplete(ctx context.Context, cmd *cli.Command) {
 	for alias := range s.Store.Mounts() {
 		fmt.Fprintln(stdout, alias)
 	}
 }
 
-// MountAdd adds a new mount
-func (s *Action) MountAdd(c *cli.Context) error {
-	ctx := ctxutil.WithGlobalFlags(c)
-	alias := c.Args().Get(0)
-	localPath := c.Args().Get(1)
-	if alias == "" {
-		return ExitError(ExitUsage, nil, "usage: %s mounts add <alias> [local path]", s.Name)
-	}
+// MountAdd adds a new mount.
+func (s *mountHandler) MountAdd(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
 
-	if localPath == "" {
-		localPath = config.PwStoreDir(alias)
+	var alias, localPath string
+	switch cmd.Args().Len() {
+	case 0:
+		return exit.Error(exit.Usage, nil, "usage: %s mounts add <local path> OR %s mounts add <alias> <local path>", s.Name, s.Name)
+	case 1:
+		localPath = cmd.Args().Get(0)
+		alias = filepath.Base(localPath)
+	default:
+		alias = cmd.Args().Get(0)
+		localPath = cmd.Args().Get(1)
 	}
 
 	if s.Store.Exists(ctx, alias) {
 		out.Warningf(ctx, "shadowing %s entry", alias)
 	}
 
-	if err := s.Store.AddMount(ctx, alias, localPath); err != nil {
-		switch e := errors.Unwrap(err).(type) {
-		case root.AlreadyMountedError:
-			out.Printf(ctx, "Store is already mounted")
-			return nil
-		case root.NotInitializedError:
-			out.Printf(ctx, "Mount %s is not yet initialized. Please use 'gopass init --store %s' instead", e.Alias(), e.Alias())
-			return e
-		default:
-			return ExitError(ExitMount, err, "failed to add mount %q to %q: %s", alias, localPath, err)
-		}
+	if cmd.Bool("create") && !set.New(alias).IsSubset(set.New(s.Store.MountPoints()...)) {
+		debug.Log("creating new mount %s at %s", alias, localPath)
+
+		return s.initFn(ctx, alias, localPath)
 	}
 
-	if err := s.cfg.Save(); err != nil {
-		return ExitError(ExitConfig, err, "failed to save config: %s", err)
+	if err := s.Store.AddMount(ctx, alias, localPath); err != nil {
+		var aerr *root.AlreadyMountedError
+		if errors.As(err, &aerr) {
+			out.Printf(ctx, "Store is already mounted")
+
+			return nil
+		}
+		var nerr *root.NotInitializedError
+		if errors.As(err, &nerr) {
+			out.Printf(ctx, "Mount %s is not yet initialized. Please use 'gopass init --store %s' instead", nerr.Alias(), nerr.Alias())
+
+			return nerr
+		}
+
+		return exit.Error(exit.Mount, err, "failed to add mount %q to %q: %s", alias, localPath, err)
 	}
 
 	out.Printf(ctx, "Mounted %s as %s", alias, localPath)
+
 	return nil
+}
+
+// MountsVersions prints the backend versions for each mount.
+func (s *mountHandler) MountsVersions(ctx context.Context, cmd *cli.Command) error {
+	ctx = ctxutil.WithGlobalFlags(ctx, cmd)
+
+	cryptoVer := versionInfo(ctx, s.Store.Crypto(ctx, ""))
+	storageVer := versionInfo(ctx, s.Store.Storage(ctx, ""))
+
+	tpl := "%-10s - %10s - %10s\n"
+	fmt.Fprintf(stdout, tpl, "<root>", cryptoVer, storageVer)
+
+	// report all used crypto, sync and fs backends.
+	for _, mp := range s.Store.MountPoints() {
+		cv := versionInfo(ctx, s.Store.Crypto(ctx, mp))
+		sv := versionInfo(ctx, s.Store.Storage(ctx, mp))
+
+		fmt.Fprintf(stdout, tpl, mp, cv, sv)
+	}
+
+	fmt.Fprintln(stdout)
+	fmt.Fprintf(stdout, "Available Crypto Backends: %s\n", strings.Join(backend.CryptoRegistry.BackendNames(), ", "))
+	fmt.Fprintf(stdout, "Available Storage Backends: %s\n", strings.Join(backend.StorageRegistry.BackendNames(), ", "))
+
+	return nil
+}
+
+type versioner interface {
+	Name() string
+	Version(context.Context) semver.Version
+}
+
+func versionInfo(ctx context.Context, v versioner) string {
+	if v == nil {
+		return "<none>"
+	}
+
+	return fmt.Sprintf("%s %s", v.Name(), v.Version(ctx))
 }

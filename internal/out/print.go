@@ -1,3 +1,6 @@
+// Package out provides a simple output interface for gopass.
+// It provides functions to print messages to stdout and stderr.
+// These sinks can be replaced by a different implementation, e.g. for testing.
 package out
 
 import (
@@ -12,17 +15,38 @@ import (
 )
 
 var (
-	// Stdout is exported for tests
+	// Stdout is exported for tests.
 	Stdout io.Writer = os.Stdout
-	// Stderr is exported for tests
+	// Stderr is exported for tests.
 	Stderr io.Writer = os.Stderr
 )
 
+// stdout returns the writer to use for regular output. It prefers a
+// context-provided writer over the package-level default, so parallel tests
+// can capture output without mutating shared state.
+func stdout(ctx context.Context) io.Writer {
+	if wp, ok := ctx.Value(ctxKeyWriter).(writerPair); ok {
+		return wp.stdout
+	}
+
+	return Stdout
+}
+
+// stderr returns the writer to use for diagnostic output, following the same
+// context-first resolution as stdout.
+func stderr(ctx context.Context) io.Writer {
+	if wp, ok := ctx.Value(ctxKeyWriter).(writerPair); ok {
+		return wp.stderr
+	}
+
+	return Stderr
+}
+
 // Secret is a string wrapper for strings containing secrets. These won't be
-// logged as long a GOPASS_DEBUG_LOG_SECRETS is not set
+// logged as long a GOPASS_DEBUG_LOG_SECRETS is not set.
 type Secret string
 
-// SafeStr always return "(elided)"
+// SafeStr always return "(elided)".
 func (s Secret) SafeStr() string {
 	return "(elided)"
 }
@@ -31,75 +55,96 @@ func newline(ctx context.Context) string {
 	if HasNewline(ctx) {
 		return "\n"
 	}
+
 	return ""
 }
 
-// Print prints the given string
-func Print(ctx context.Context, arg interface{}) {
-	Printf(ctx, "%s", arg)
+// Print prints the given string.
+func Print(ctx context.Context, arg any) {
+	if ctxutil.IsHidden(ctx) {
+		return
+	}
+	debug.LogN(1, "%s", arg)
+	fmt.Fprintf(stdout(ctx), Prefix(ctx)+"%s"+newline(ctx), arg)
 }
 
-// Printf formats and prints the given string
-func Printf(ctx context.Context, format string, args ...interface{}) {
+// Printf formats and prints the given string.
+func Printf(ctx context.Context, format string, args ...any) {
 	if ctxutil.IsHidden(ctx) {
 		return
 	}
 	debug.LogN(1, format, args...)
-	fmt.Fprintf(Stdout, Prefix(ctx)+format+newline(ctx), args...)
+	fmt.Fprintf(stdout(ctx), Prefix(ctx)+format+newline(ctx), args...)
 }
 
-// Notice prints the string with an exclamation mark
-func Notice(ctx context.Context, arg interface{}) {
-	Noticef(ctx, "%s", arg)
+// Notice prints the string with an exclamation mark.
+func Notice(ctx context.Context, arg any) {
+	if ctxutil.IsHidden(ctx) {
+		return
+	}
+	debug.LogN(1, "NOTICE: %s", arg)
+	fmt.Fprintf(stdout(ctx), Prefix(ctx)+"⚠ %s"+newline(ctx), arg)
 }
 
-// Noticef prints the string with an exclamation mark in front
-func Noticef(ctx context.Context, format string, args ...interface{}) {
+// Noticef prints the string with an exclamation mark in front.
+func Noticef(ctx context.Context, format string, args ...any) {
 	if ctxutil.IsHidden(ctx) {
 		return
 	}
 	debug.LogN(1, "NOTICE: "+format, args...)
-	fmt.Fprintf(Stdout, Prefix(ctx)+"⚠ "+format+newline(ctx), args...)
+	fmt.Fprintf(stdout(ctx), Prefix(ctx)+"⚠ "+format+newline(ctx), args...)
 }
 
-// Error prints the string with a red cross in front
-func Error(ctx context.Context, arg interface{}) {
-	Errorf(ctx, "%s", arg)
+// Error prints the string with a red cross in front.
+func Error(ctx context.Context, arg any) {
+	if ctxutil.IsHidden(ctx) {
+		return
+	}
+	debug.LogN(1, "ERROR: %s", arg)
+	fmt.Fprint(stderr(ctx), color.RedString(Prefix(ctx)+"❌ %s"+newline(ctx), arg))
 }
 
-// Errorf prints the string in red to stderr
-func Errorf(ctx context.Context, format string, args ...interface{}) {
+// Errorf prints the string in red to stderr.
+func Errorf(ctx context.Context, format string, args ...any) {
 	if ctxutil.IsHidden(ctx) {
 		return
 	}
 	debug.LogN(1, "ERROR: "+format, args...)
-	fmt.Fprint(Stderr, color.RedString(Prefix(ctx)+"❌ "+format+newline(ctx), args...))
+	fmt.Fprint(stderr(ctx), color.RedString(Prefix(ctx)+"❌ "+format+newline(ctx), args...))
 }
 
-// OK prints the string with a green checkmark in front
-func OK(ctx context.Context, arg interface{}) {
-	OKf(ctx, "%s", arg)
+// OK prints the string with a green checkmark in front.
+func OK(ctx context.Context, arg any) {
+	if ctxutil.IsHidden(ctx) {
+		return
+	}
+	debug.LogN(1, "OK: %s", arg)
+	fmt.Fprintf(stdout(ctx), Prefix(ctx)+"✅ %s"+newline(ctx), arg)
 }
 
-// OKf prints the string in with an OK checkmark in front
-func OKf(ctx context.Context, format string, args ...interface{}) {
+// OKf prints the string in with an OK checkmark in front.
+func OKf(ctx context.Context, format string, args ...any) {
 	if ctxutil.IsHidden(ctx) {
 		return
 	}
 	debug.LogN(1, "OK: "+format, args...)
-	fmt.Fprintf(Stdout, Prefix(ctx)+"✅ "+format+newline(ctx), args...)
+	fmt.Fprintf(stdout(ctx), Prefix(ctx)+"✅ "+format+newline(ctx), args...)
 }
 
-// Warning prints the string with a warning sign in front
-func Warning(ctx context.Context, arg interface{}) {
-	Warningf(ctx, "%s", arg)
+// Warning prints the string with a warning sign in front.
+func Warning(ctx context.Context, arg any) {
+	if ctxutil.IsHidden(ctx) {
+		return
+	}
+	debug.LogN(1, "WARNING: %s", arg)
+	fmt.Fprint(stderr(ctx), color.YellowString(Prefix(ctx)+"⚠ %s"+newline(ctx), arg))
 }
 
-// Warningf prints the string in yellow to stderr and prepends a warning sign
-func Warningf(ctx context.Context, format string, args ...interface{}) {
+// Warningf prints the string in yellow to stderr and prepends a warning sign.
+func Warningf(ctx context.Context, format string, args ...any) {
 	if ctxutil.IsHidden(ctx) {
 		return
 	}
 	debug.LogN(1, "WARNING: "+format, args...)
-	fmt.Fprint(Stderr, color.YellowString(Prefix(ctx)+"⚠ "+format+newline(ctx), args...))
+	fmt.Fprint(stderr(ctx), color.YellowString(Prefix(ctx)+"⚠ "+format+newline(ctx), args...))
 }

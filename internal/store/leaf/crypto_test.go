@@ -1,40 +1,25 @@
 package leaf
 
 import (
-	"bytes"
-	"context"
-	"os"
 	"testing"
 
-	"github.com/gopasspw/gopass/internal/out"
-
-	"github.com/stretchr/testify/assert"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGPG(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
-	tempdir, err := os.MkdirTemp("", "gopass-")
-	require.NoError(t, err)
-	defer func() {
-		_ = os.RemoveAll(tempdir)
-	}()
+	ctx, _, _ = captureOutput(t, ctx)
 
-	obuf := &bytes.Buffer{}
-	out.Stdout = obuf
-	defer func() {
-		out.Stdout = os.Stdout
-	}()
-
-	s, err := createSubStore(tempdir)
+	s, err := createSubStore(t)
 	require.NoError(t, err)
 
-	assert.NoError(t, s.ImportMissingPublicKeys(ctx))
+	require.NoError(t, s.ImportMissingPublicKeys(ctx))
 
 	newRecp := "A3683834"
 	err = s.AddRecipient(ctx, newRecp)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.NoError(t, s.ImportMissingPublicKeys(ctx))
+	require.NoError(t, s.ImportMissingPublicKeys(ctx))
 }

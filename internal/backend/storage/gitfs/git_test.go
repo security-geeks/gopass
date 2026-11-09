@@ -2,31 +2,27 @@ package gitfs
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/blang/semver/v4"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGit(t *testing.T) {
-	td, err := os.MkdirTemp("", "gopass-")
-	require.NoError(t, err)
-	defer func() {
-		_ = os.RemoveAll(td)
-	}()
+	td := t.TempDir()
 
 	gitdir := filepath.Join(td, "git")
-	require.NoError(t, os.Mkdir(gitdir, 0755))
+	require.NoError(t, os.Mkdir(gitdir, 0o755))
 	gitdir2 := filepath.Join(td, "git2")
-	require.NoError(t, os.Mkdir(gitdir2, 0755))
+	require.NoError(t, os.Mkdir(gitdir2, 0o755))
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 
 	buf := &bytes.Buffer{}
@@ -41,47 +37,141 @@ func TestGit(t *testing.T) {
 		require.NotNil(t, git)
 
 		sv := git.Version(ctx)
-		assert.NotEqual(t, "", sv.String())
+		assert.NotEmpty(t, sv.String())
 
 		assert.True(t, git.IsInitialized())
 		tf := filepath.Join(gitdir, "some-file")
-		require.NoError(t, os.WriteFile(tf, []byte("foobar"), 0644))
-		assert.NoError(t, git.Add(ctx, "some-file"))
+		require.NoError(t, os.WriteFile(tf, []byte("foobar"), 0o644))
+		require.NoError(t, git.Add(ctx, "some-file"))
 		assert.True(t, git.HasStagedChanges(ctx))
-		assert.NoError(t, git.Commit(ctx, "added some-file"))
+		require.NoError(t, git.Commit(ctx, "added some-file"))
 		assert.False(t, git.HasStagedChanges(ctx))
 
-		assert.Error(t, git.Push(ctx, "origin", "master"))
-		assert.Error(t, git.Pull(ctx, "origin", "master"))
+		require.Error(t, git.Push(ctx, "origin", "master"))
+		require.Error(t, git.Pull(ctx, "origin", "master"))
 	})
 
 	t.Run("open existing repo", func(t *testing.T) {
 		git, err := New(gitdir)
 		require.NoError(t, err)
 		require.NotNil(t, git)
-		assert.Equal(t, "git", git.Name())
-		assert.NoError(t, git.AddRemote(ctx, "foo", "file:///tmp/foo"))
-		assert.NoError(t, git.RemoveRemote(ctx, "foo"))
-		assert.Error(t, git.RemoveRemote(ctx, "foo"))
+		assert.Equal(t, "gitfs", git.Name())
+		require.NoError(t, git.AddRemote(ctx, "foo", "file:///tmp/foo"))
+		require.NoError(t, git.RemoveRemote(ctx, "foo"))
+		require.Error(t, git.RemoveRemote(ctx, "foo"))
 	})
 
 	t.Run("clone existing repo", func(t *testing.T) {
-		git, err := Clone(ctx, gitdir, gitdir2)
+		git, err := Clone(ctx, gitdir, gitdir2, "", "")
 		require.NoError(t, err)
 		require.NotNil(t, git)
-		assert.Equal(t, "git", git.Name())
+		assert.Equal(t, "gitfs", git.Name())
 
 		tf := filepath.Join(gitdir2, "some-other-file")
-		require.NoError(t, os.WriteFile(tf, []byte("foobar"), 0644))
-		assert.NoError(t, git.Add(ctx, "some-other-file"))
-		assert.NoError(t, git.Commit(ctx, "added some-other-file"))
+		require.NoError(t, os.WriteFile(tf, []byte("foobar"), 0o644))
+		require.NoError(t, git.Add(ctx, "some-other-file"))
+		require.NoError(t, git.Commit(ctx, "added some-other-file"))
 
 		revs, err := git.Revisions(ctx, "some-other-file")
 		require.NoError(t, err)
-		assert.True(t, len(revs) == 1)
+		assert.Len(t, revs, 1)
 
 		content, err := git.GetRevision(ctx, "some-other-file", revs[0].Hash)
 		require.NoError(t, err)
 		assert.Equal(t, "foobar", string(content))
 	})
+}
+
+func TestParseVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		in      string
+		sv      semver.Version
+		wantErr bool
+	}{
+		{
+			name:    "empty",
+			in:      "",
+			wantErr: true,
+		},
+		{
+			name:    "invalid",
+			in:      "foo",
+			wantErr: true,
+		},
+		{
+			name: "valid",
+			in:   "2.30.0",
+			sv:   semver.MustParse("2.30.0"),
+		},
+		{
+			name: "invalid-recovered", // GH-2686
+			in:   "2.42.0.windows.2",
+			sv:   semver.MustParse("2.42.0"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sv, err := parseVersion(tc.in)
+			assert.Equal(t, tc.sv, sv)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestInitWithSetupRemoteSuppressesCommit verifies that Init does not create
+// an automatic commit when HasSetupRemote is set in the context.
+func TestInitWithSetupRemoteSuppressesCommit(t *testing.T) {
+	td := t.TempDir()
+	gitdir := filepath.Join(td, "git-no-commit")
+	require.NoError(t, os.Mkdir(gitdir, 0o755))
+
+	ctx := config.NewContextInMemory()
+	ctx = ctxutil.WithAlwaysYes(ctx, true)
+	ctx = ctxutil.WithSetupRemote(ctx, "https://example.com/repo.git")
+
+	buf := &bytes.Buffer{}
+	out.Stdout = buf
+	defer func() { out.Stdout = os.Stdout }()
+
+	// Create a file so there would be staged changes to commit.
+	tf := filepath.Join(gitdir, "password")
+	require.NoError(t, os.WriteFile(tf, []byte("hunter2\n"), 0o644))
+
+	git, err := Init(ctx, gitdir, "Test User", "test@example.com")
+	require.NoError(t, err)
+	require.NotNil(t, git)
+
+	// With the flag set, the commit must have been suppressed.
+	// The staged file should still be outstanding (no commit was made).
+	assert.True(t, git.HasStagedChanges(ctx), "expected staged changes to remain when setup remote suppresses commit")
+}
+
+// TestInitWithoutSetupRemoteCreatesCommit verifies the existing (default)
+// behaviour: Init still creates the initial commit when no setup remote is set.
+func TestInitWithoutSetupRemoteCreatesCommit(t *testing.T) {
+	td := t.TempDir()
+	gitdir := filepath.Join(td, "git-with-commit")
+	require.NoError(t, os.Mkdir(gitdir, 0o755))
+
+	ctx := config.NewContextInMemory()
+	ctx = ctxutil.WithAlwaysYes(ctx, true)
+
+	buf := &bytes.Buffer{}
+	out.Stdout = buf
+	defer func() { out.Stdout = os.Stdout }()
+
+	// Create a file so there are staged changes.
+	tf := filepath.Join(gitdir, "password")
+	require.NoError(t, os.WriteFile(tf, []byte("hunter2\n"), 0o644))
+
+	git, err := Init(ctx, gitdir, "Test User", "test@example.com")
+	require.NoError(t, err)
+	require.NotNil(t, git)
+
+	// Without the flag the initial commit should have been created.
+	assert.False(t, git.HasStagedChanges(ctx), "expected no staged changes after automatic commit")
 }

@@ -1,18 +1,19 @@
-// +build !windows
+//go:build !windows
 
 package pwgen
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPwgenExternal(t *testing.T) {
-	_ = os.Setenv("GOPASS_EXTERNAL_PWGEN", "echo foobar")
-	defer os.Unsetenv("GOPASS_EXTERNAL_PWGEN")
+	t.Setenv("GOPASS_EXTERNAL_PWGEN", "echo foobar")
+
 	pw, err := GenerateExternal(4)
-	assert.NoError(t, err)
+
+	require.NoError(t, err)
 	assert.Equal(t, "foobar 4", pw)
 }

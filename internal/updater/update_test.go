@@ -1,4 +1,4 @@
-// +build !windows
+//go:build !windows
 
 package updater
 
@@ -9,22 +9,20 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
+//nolint:wrapcheck
 func TestIsUpdateable(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	oldExec := executable
+
 	defer func() {
 		executable = oldExec
 	}()
 
-	td, err := os.MkdirTemp("", "gopass-")
-	require.NoError(t, err)
-	defer func() {
-		_ = os.RemoveAll(td)
-	}()
+	td := t.TempDir()
 
 	for _, tc := range []struct {
 		name string
@@ -36,7 +34,7 @@ func TestIsUpdateable(t *testing.T) {
 		{
 			name: "executable error",
 			exec: func(context.Context) (string, error) {
-				return "", fmt.Errorf("failed")
+				return "", fmt.Errorf("failed") //nolint:goerr113
 			},
 		},
 		{
@@ -49,7 +47,9 @@ func TestIsUpdateable(t *testing.T) {
 		{
 			name: "force update",
 			pre: func() error {
-				return os.Setenv("GOPASS_FORCE_UPDATE", "true")
+				t.Setenv("GOPASS_FORCE_UPDATE", "true")
+
+				return nil
 			},
 			exec: func(context.Context) (string, error) {
 				return "", nil
@@ -62,7 +62,9 @@ func TestIsUpdateable(t *testing.T) {
 		{
 			name: "update in gopath",
 			pre: func() error {
-				return os.Setenv("GOPATH", "/tmp/foo")
+				t.Setenv("GOPATH", "/tmp/foo")
+
+				return nil
 			},
 			exec: func(context.Context) (string, error) {
 				return "/tmp/foo/gopass", nil
@@ -83,7 +85,7 @@ func TestIsUpdateable(t *testing.T) {
 		{
 			name: "no write access to file",
 			pre: func() error {
-				return os.WriteFile(filepath.Join(td, "gopass"), []byte("foobar"), 0555)
+				return os.WriteFile(filepath.Join(td, "gopass"), []byte("foobar"), 0o555)
 			},
 			exec: func(context.Context) (string, error) {
 				return filepath.Join(td, "gopass"), nil
@@ -93,7 +95,8 @@ func TestIsUpdateable(t *testing.T) {
 			name: "no write access to dir",
 			pre: func() error {
 				dir := filepath.Join(td, "bin")
-				return os.Mkdir(dir, 0555)
+
+				return os.Mkdir(dir, 0o555)
 			},
 			exec: func(context.Context) (string, error) {
 				return filepath.Join(td, "bin"), nil
@@ -103,15 +106,18 @@ func TestIsUpdateable(t *testing.T) {
 		if tc.pre != nil {
 			require.NoError(t, tc.pre(), tc.name)
 		}
+
 		executable = tc.exec
+
 		err := IsUpdateable(ctx)
 		if tc.ok {
-			assert.NoError(t, err, tc.name)
+			require.NoError(t, err, tc.name)
 		} else {
-			assert.Error(t, err, tc.name)
+			require.Error(t, err, tc.name)
 		}
+
 		if tc.post != nil {
-			assert.NoError(t, tc.post(), tc.name)
+			require.NoError(t, tc.post(), tc.name)
 		}
 	}
 }

@@ -7,29 +7,31 @@ import (
 	"os"
 	"testing"
 
-	"github.com/atotto/clipboard"
+	"github.com/fatih/color"
+	"github.com/gopasspw/clipboard"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
+	"github.com/gopasspw/gopass/internal/store"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/gopass/secrets"
 	"github.com/gopasspw/gopass/tests/gptest"
-
-	"github.com/fatih/color"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
-func TestShowMulti(t *testing.T) {
+func TestShowPasswordConfig(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithTerminal(ctx, false)
 	ctx = ctxutil.WithInteractive(ctx, false)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
 	color.NoColor = true
 	buf := &bytes.Buffer{}
@@ -40,39 +42,183 @@ func TestShowMulti(t *testing.T) {
 		out.Stdout = os.Stdout
 	}()
 
+	// two-liner: password on the first line, a key-value pair below
+	sec := secrets.NewAKV()
+	sec.SetPassword("123")
+	require.NoError(t, sec.Set("bar", "zab"))
+	require.NoError(t, act.Store.Set(ctx, "bar/baz", sec))
+	buf.Reset()
+
+	t.Run("default is full output", func(t *testing.T) {
+		defer buf.Reset()
+
+		c := gptest.CliCtx(ctx, t, "bar/baz")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "123")
+		assert.Contains(t, buf.String(), "bar: zab")
+	})
+
+	require.NoError(t, act.cfg.Set("", "show.password", "true"))
+	defer func() {
+		require.NoError(t, act.cfg.Set("", "show.password", "false"))
+	}()
+
+	t.Run("password-only by default", func(t *testing.T) {
+		defer buf.Reset()
+
+		c := gptest.CliCtx(ctx, t, "bar/baz")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Equal(t, "123", buf.String())
+		assert.NotContains(t, buf.String(), "Secret:")
+	})
+
+	t.Run("explicit -o=false restores full output", func(t *testing.T) {
+		defer buf.Reset()
+
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"password": "false"}, "bar/baz")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "123")
+		assert.Contains(t, buf.String(), "bar: zab")
+	})
+
+	t.Run("clip flag overrides the config default", func(t *testing.T) {
+		defer buf.Reset()
+
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "true"}, "bar/baz")
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, buf.String(), "123")
+		assert.NotContains(t, buf.String(), "bar: zab")
+	})
+
+	t.Run("alsoclip flag overrides the config default", func(t *testing.T) {
+		defer buf.Reset()
+
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"alsoclip": "true"}, "bar/baz")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "123")
+		assert.Contains(t, buf.String(), "bar: zab")
+	})
+
+	t.Run("qr flag overrides the config default", func(t *testing.T) {
+		defer buf.Reset()
+
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"qr": "true"}, "bar/baz")
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, buf.String(), "123")
+		assert.NotContains(t, buf.String(), "bar: zab")
+	})
+
+	t.Run("qrbody flag overrides the config default", func(t *testing.T) {
+		defer buf.Reset()
+
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"qrbody": "true"}, "bar/baz")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "bar: zab")
+	})
+
+	t.Run("key lookup still works", func(t *testing.T) {
+		defer buf.Reset()
+
+		c := gptest.CliCtx(ctx, t, "bar/baz", "bar")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Equal(t, "zab", buf.String())
+	})
+
+	t.Run("password-only wins over safecontent", func(t *testing.T) {
+		defer buf.Reset()
+
+		require.NoError(t, act.cfg.Set("", "show.safecontent", "true"))
+		defer func() {
+			require.NoError(t, act.cfg.Set("", "show.safecontent", "false"))
+		}()
+
+		c := gptest.CliCtx(ctx, t, "bar/baz")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "123")
+		assert.NotContains(t, buf.String(), "bar: zab")
+	})
+
+	t.Run("passwordless entry errors like -o", func(t *testing.T) {
+		defer buf.Reset()
+
+		require.NoError(t, act.insertStdin(ctx, "nopw", []byte("---\nkey: val"), false))
+
+		c := gptest.CliCtx(ctx, t, "nopw")
+		require.Error(t, act.Show(ctx, c))
+		assert.NotContains(t, buf.String(), "key: val")
+	})
+
+	t.Run("autoclip copies and prints password only", func(t *testing.T) {
+		defer buf.Reset()
+
+		require.NoError(t, act.cfg.Set("", "show.autoclip", "true"))
+		defer func() {
+			require.NoError(t, act.cfg.Set("", "show.autoclip", "false"))
+		}()
+
+		c := gptest.CliCtx(ctx, t, "bar/baz")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "123")
+		assert.NotContains(t, buf.String(), "bar: zab")
+	})
+}
+
+func TestShowMulti(t *testing.T) {
+	u := gptest.NewUnitTester(t)
+
+	ctx := config.NewContextInMemory()
+	ctx = ctxutil.WithAlwaysYes(ctx, true)
+	ctx = ctxutil.WithTerminal(ctx, false)
+	ctx = ctxutil.WithInteractive(ctx, false)
+
+	act, err := newMock(ctx, u.StoreDir(""))
+	require.NoError(t, err)
+	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
+
+	color.NoColor = true
+	buf := &bytes.Buffer{}
+	out.Stdout = buf
+	stdout = buf
+	defer func() {
+		stdout = os.Stdout
+		out.Stdout = os.Stdout
+	}()
+
+	// first add another entry in a subdir
+	sec := secrets.NewAKV()
+	sec.SetPassword("123")
+	require.NoError(t, sec.Set("bar", "zab"))
+	require.NoError(t, act.Store.Set(ctx, "bar/baz", sec))
+	buf.Reset()
+
 	t.Run("show foo", func(t *testing.T) {
 		defer buf.Reset()
 		c := gptest.CliCtx(ctx, t, "foo")
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.Contains(t, buf.String(), "secret")
 	})
 
 	t.Run("show --sync foo", func(t *testing.T) {
 		defer buf.Reset()
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"sync": "true"}, "foo")
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.Contains(t, buf.String(), "secret")
 	})
 
 	t.Run("show dir", func(t *testing.T) {
-		// first add another entry in a subdir
-		sec := secrets.NewKV()
-		sec.SetPassword("123")
-		sec.Set("bar", "zab")
-		assert.NoError(t, act.Store.Set(ctx, "bar/baz", sec))
-		buf.Reset()
-
 		c := gptest.CliCtx(ctx, t, "bar")
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.Equal(t, "bar/\n└── baz\n\n", buf.String())
 		buf.Reset()
 	})
 
+	require.NoError(t, act.cfg.Set("", "show.safecontent", "true"))
+
 	t.Run("show twoliner with safecontent enabled", func(t *testing.T) {
-		ctx := ctxutil.WithShowSafeContent(ctx, true)
 		c := gptest.CliCtx(ctx, t, "bar/baz")
 
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.Contains(t, buf.String(), "bar: zab")
 		assert.NotContains(t, buf.String(), "password: ***")
 		assert.NotContains(t, buf.String(), "123")
@@ -80,66 +226,100 @@ func TestShowMulti(t *testing.T) {
 	})
 
 	t.Run("show foo with safecontent enabled, should error out", func(t *testing.T) {
-		ctx := ctxutil.WithShowSafeContent(ctx, true)
-
 		c := gptest.CliCtx(ctx, t, "foo")
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.NotContains(t, buf.String(), "secret")
 		buf.Reset()
 	})
 
 	t.Run("show foo with safecontent enabled, with the force flag", func(t *testing.T) {
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"unsafe": "true"}, "foo")
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.Contains(t, buf.String(), "secret")
 		buf.Reset()
 	})
 
 	t.Run("show twoliner with safecontent enabled, but with the clip flag, which should copy just the secret", func(t *testing.T) {
-		ctx := ctxutil.WithShowSafeContent(ctx, true)
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "true"}, "bar/baz")
 
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.NotContains(t, buf.String(), "123")
 		buf.Reset()
 	})
 
 	t.Run("show entry with unsafe keys", func(t *testing.T) {
-		sec := secrets.NewKV()
+		sec := secrets.NewAKV()
 		sec.SetPassword("123")
-		sec.Set("bar", "zab")
-		sec.Set("foo", "baz")
-		sec.Set("hello", "world")
-		sec.Set("unsafe-keys", "foo, bar")
-		assert.NoError(t, act.Store.Set(ctx, "unsafe/keys", sec))
+		require.NoError(t, sec.Set("bar", "zab"))
+		require.NoError(t, sec.Set("foo", "baz"))
+		require.NoError(t, sec.Set("hello", "world"))
+		require.NoError(t, sec.Set("unsafe-keys", "foo, bar"))
+		require.NoError(t, act.Store.Set(ctx, "unsafe/keys", sec))
 		buf.Reset()
 
-		ctx := ctxutil.WithShowSafeContent(ctx, true)
 		c := gptest.CliCtx(ctx, t, "unsafe/keys")
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.Contains(t, buf.String(), "*****")
 		assert.NotContains(t, buf.String(), "zab")
 		assert.NotContains(t, buf.String(), "baz")
 		buf.Reset()
 	})
 
+	t.Run("copy a key with the clip flag without showing any output", func(t *testing.T) {
+		sec := secrets.NewAKV()
+		sec.SetPassword("123")
+		require.NoError(t, sec.Set("bar", "zab"))
+		require.NoError(t, act.Store.Set(ctx, "clipped/keys", sec))
+		buf.Reset()
+
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "true"}, "clipped/keys")
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, buf.String(), "bar")
+		assert.NotContains(t, buf.String(), "zab")
+		buf.Reset()
+	})
+
+	t.Run("show entry with otpauth field with safecontent enabled", func(t *testing.T) {
+		require.NoError(t, act.insertStdin(ctx, "otpauth", []byte("123\n---\notpauth://totp/WEBSITE:@USER?secret=SECRET&issuer=GoPass"), false))
+		buf.Reset()
+
+		c := gptest.CliCtx(ctx, t, "otpauth")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "otpauth://*****")
+		buf.Reset()
+	})
+
+	t.Run("show entry with otp as keys field with safecontent enabled", func(t *testing.T) {
+		sec := secrets.NewAKV()
+		sec.SetPassword("123")
+		require.NoError(t, sec.Set("otpauth", "otpauth://totp/WEBSITE:@USER?secret=SECRET&issuer=GoPass"))
+		require.NoError(t, sec.Set("totp", "otpauth://totp/WEBSITE:@USER?secret=SECRET&issuer=GoPass"))
+		require.NoError(t, sec.Set("hotp", "otpauth://totp/WEBSITE:@USER?secret=SECRET&issuer=GoPass"))
+		require.NoError(t, act.Store.Set(ctx, "otpauthKeys", sec))
+		buf.Reset()
+
+		c := gptest.CliCtx(ctx, t, "otpauthKeys")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "otpauth: *****")
+		assert.Contains(t, buf.String(), "hotp: *****")
+		assert.Contains(t, buf.String(), "totp: *****")
+		buf.Reset()
+	})
+
 	t.Run("show twoliner with safecontent enabled", func(t *testing.T) {
-		ctx := ctxutil.WithShowSafeContent(ctx, true)
 		c := gptest.CliCtx(ctx, t, "bar/baz")
 
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.Contains(t, buf.String(), "bar: zab")
 		assert.NotContains(t, buf.String(), "password: ***")
 		assert.NotContains(t, buf.String(), "123")
 		buf.Reset()
 	})
 
-	t.Run("show twoliner with parsing disabled and safecontent enabled", func(t *testing.T) {
-		ctx := ctxutil.WithShowSafeContent(ctx, true)
-		ctx = ctxutil.WithShowParsing(ctx, false)
+	t.Run("show twoliner with safecontent enabled", func(t *testing.T) {
 		c := gptest.CliCtx(ctx, t, "bar/baz")
 
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.Contains(t, buf.String(), "bar: zab")
 		// password should not show up neither be obstructed
 		assert.NotContains(t, buf.String(), "123")
@@ -147,86 +327,251 @@ func TestShowMulti(t *testing.T) {
 		buf.Reset()
 	})
 
-	t.Run("show key with parsing enabled", func(t *testing.T) {
-		ctx := ctxutil.WithShowParsing(ctx, true)
+	require.NoError(t, act.cfg.Set("", "show.safecontent", "false"))
+
+	t.Run("show key ", func(t *testing.T) {
 		c := gptest.CliCtx(ctx, t, "bar/baz", "bar")
 
-		assert.NoError(t, act.Show(c))
+		require.NoError(t, act.Show(ctx, c))
 		assert.Equal(t, "zab", buf.String())
 		buf.Reset()
 	})
 
-	t.Run("show key with parsing disabled", func(t *testing.T) {
-		ctx := ctxutil.WithShowParsing(ctx, false)
-		c := gptest.CliCtx(ctx, t, "bar/baz", "bar")
-
-		assert.NoError(t, act.Show(c))
-		assert.Equal(t, "123\nbar: zab", buf.String())
-		buf.Reset()
-	})
-
-	t.Run("show nonexisting key with parsing enabled", func(t *testing.T) {
-		ctx := ctxutil.WithShowParsing(ctx, true)
+	t.Run("show nonexisting key", func(t *testing.T) {
 		c := gptest.CliCtx(ctx, t, "bar/baz", "nonexisting")
 
-		assert.Error(t, act.Show(c))
+		require.Error(t, act.Show(ctx, c))
 		buf.Reset()
 	})
 
 	t.Run("show keys with mixed case", func(t *testing.T) {
-		ctx := ctxutil.WithShowParsing(ctx, true)
-
-		assert.NoError(t, act.insertStdin(ctx, "baz", []byte("foobar\nOther: meh\nuser: name\nbody text"), false))
+		require.NoError(t, act.insertStdin(ctx, "baz2", []byte("foobar\nOther: meh\nuser: name\nbody text"), false))
 		buf.Reset()
 
-		c := gptest.CliCtx(ctx, t, "baz", "Other")
-		assert.NoError(t, act.Show(c))
+		c := gptest.CliCtx(ctx, t, "baz2", "Other")
+		require.NoError(t, act.Show(ctx, c))
 		assert.Equal(t, "meh", buf.String())
 		buf.Reset()
 	})
 
 	t.Run("show value with format strings", func(t *testing.T) {
-		ctx := ctxutil.WithShowParsing(ctx, true)
-
 		pw := "some-chars-are-odd-%s-%p-%q"
 
-		assert.NoError(t, act.insertStdin(ctx, "printf", []byte(pw), false))
+		require.NoError(t, act.insertStdin(ctx, "printf", []byte(pw), false))
 		buf.Reset()
 
 		c := gptest.CliCtx(ctx, t, "printf")
-		assert.NoError(t, act.Show(c))
-		assert.Equal(t, pw, buf.String())
+		require.NoError(t, act.Show(ctx, c))
+		assert.Equal(t, pw+"\n", buf.String())
 		assert.NotContains(t, buf.String(), "MISSING")
 		buf.Reset()
+	})
+
+	// show.hidden-keys tests — re-enable safecontent for these
+	require.NoError(t, act.cfg.Set("", "show.safecontent", "true"))
+
+	t.Run("show.hidden-keys hides configured key", func(t *testing.T) {
+		require.NoError(t, act.cfg.Set("", "show.hidden-keys", "api_token"))
+		defer func() { _ = act.cfg.Set("", "show.hidden-keys", "") }()
+
+		sec := secrets.NewAKV()
+		sec.SetPassword("pw123")
+		require.NoError(t, sec.Set("api_token", "supersecret"))
+		require.NoError(t, sec.Set("username", "alice"))
+		require.NoError(t, act.Store.Set(ctx, "hidden/custom", sec))
+		buf.Reset()
+
+		c := gptest.CliCtx(ctx, t, "hidden/custom")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "api_token: *****")
+		assert.NotContains(t, buf.String(), "supersecret")
+		assert.Contains(t, buf.String(), "username: alice")
+		buf.Reset()
+	})
+
+	t.Run("show.hidden-keys is case-insensitive", func(t *testing.T) {
+		require.NoError(t, act.cfg.Set("", "show.hidden-keys", "Secret_Field"))
+		defer func() { _ = act.cfg.Set("", "show.hidden-keys", "") }()
+
+		sec := secrets.NewAKV()
+		sec.SetPassword("pw123")
+		require.NoError(t, sec.Set("secret_field", "topsecret"))
+		require.NoError(t, act.Store.Set(ctx, "hidden/case", sec))
+		buf.Reset()
+
+		c := gptest.CliCtx(ctx, t, "hidden/case")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "*****")
+		assert.NotContains(t, buf.String(), "topsecret")
+		buf.Reset()
+	})
+
+	t.Run("show.hidden-keys absent key is shown", func(t *testing.T) {
+		require.NoError(t, act.cfg.Set("", "show.hidden-keys", "other_key"))
+		defer func() { _ = act.cfg.Set("", "show.hidden-keys", "") }()
+
+		sec := secrets.NewAKV()
+		sec.SetPassword("pw123")
+		require.NoError(t, sec.Set("visible_field", "plaintext"))
+		require.NoError(t, act.Store.Set(ctx, "hidden/visible", sec))
+		buf.Reset()
+
+		c := gptest.CliCtx(ctx, t, "hidden/visible")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, buf.String(), "visible_field: plaintext")
+		buf.Reset()
+	})
+
+	t.Run("show.hidden-keys and per-secret unsafe-keys both work", func(t *testing.T) {
+		require.NoError(t, act.cfg.Set("", "show.hidden-keys", "config_hidden"))
+		defer func() { _ = act.cfg.Set("", "show.hidden-keys", "") }()
+
+		sec := secrets.NewAKV()
+		sec.SetPassword("pw123")
+		require.NoError(t, sec.Set("config_hidden", "val1"))
+		require.NoError(t, sec.Set("per_secret_hidden", "val2"))
+		require.NoError(t, sec.Set("unsafe-keys", "per_secret_hidden"))
+		require.NoError(t, act.Store.Set(ctx, "hidden/both", sec))
+		buf.Reset()
+
+		c := gptest.CliCtx(ctx, t, "hidden/both")
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, buf.String(), "val1")
+		assert.NotContains(t, buf.String(), "val2")
+		buf.Reset()
+	})
+}
+
+func TestShowClipLine(t *testing.T) {
+	u := gptest.NewUnitTester(t)
+
+	ctx := config.NewContextInMemory()
+	ctx = ctxutil.WithAlwaysYes(ctx, true)
+	ctx = ctxutil.WithTerminal(ctx, false)
+	ctx = ctxutil.WithInteractive(ctx, false)
+
+	act, err := newMock(ctx, u.StoreDir(""))
+	require.NoError(t, err)
+	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
+
+	color.NoColor = true
+	buf := &bytes.Buffer{}
+	out.Stdout = buf
+	out.Stderr = buf
+	stdout = buf
+	defer func() {
+		out.Stdout = os.Stdout
+		out.Stderr = os.Stderr
+		stdout = os.Stdout
+	}()
+
+	// Create a multiline secret.
+	sec := secrets.NewAKV()
+	sec.SetPassword("password0")
+	require.NoError(t, sec.Set("user", "admin"))
+	require.NoError(t, act.Store.Set(ctx, "multiline", sec))
+	buf.Reset()
+
+	t.Run("show -c=0 copies line 0 (password)", func(t *testing.T) {
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "0"}, "multiline")
+		require.NoError(t, act.Show(ctx, c))
+		// OnlyClip suppresses output.
+		assert.NotContains(t, buf.String(), "password0")
+		buf.Reset()
+	})
+
+	t.Run("show -c=1 copies line 1", func(t *testing.T) {
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "1"}, "multiline")
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, buf.String(), "user")
+		buf.Reset()
+	})
+
+	t.Run("show -c=99 out of range returns error", func(t *testing.T) {
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "99"}, "multiline")
+		require.Error(t, act.Show(ctx, c))
+		buf.Reset()
+	})
+
+	t.Run("show -c (no line number) copies password", func(t *testing.T) {
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "true"}, "multiline")
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, buf.String(), "password0")
+		buf.Reset()
+	})
+}
+
+func TestShowParseArgsClipLine(t *testing.T) {
+	_ = gptest.NewUnitTester(t)
+
+	t.Run("clip flag with line number sets ClipLine", func(t *testing.T) {
+		ctx := config.NewContextInMemory()
+		cmd := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "2"}, "secret")
+		ctx = showParseArgs(ctx, cmd)
+		assert.True(t, IsOnlyClip(ctx), "OnlyClip should be true when -c=N is given")
+		assert.True(t, IsClip(ctx), "Clip should be true when -c=N is given")
+		assert.Equal(t, 2, GetClipLine(ctx), "ClipLine should be 2 for -c=2")
+	})
+
+	t.Run("clip flag without value sets OnlyClip but not ClipLine", func(t *testing.T) {
+		ctx := config.NewContextInMemory()
+		cmd := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "true"}, "secret")
+		ctx = showParseArgs(ctx, cmd)
+		assert.True(t, IsOnlyClip(ctx), "OnlyClip should be true when -c is given")
+		assert.True(t, IsClip(ctx), "Clip should be true when -c is given")
+		assert.Equal(t, -1, GetClipLine(ctx), "ClipLine should be -1 (unset) for plain -c")
+	})
+
+	t.Run("clip flag with zero sets ClipLine to 0", func(t *testing.T) {
+		ctx := config.NewContextInMemory()
+		cmd := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "0"}, "secret")
+		ctx = showParseArgs(ctx, cmd)
+		assert.True(t, IsOnlyClip(ctx))
+		assert.Equal(t, 0, GetClipLine(ctx), "ClipLine should be 0 for -c=0")
+	})
+
+	t.Run("no clip flag leaves defaults", func(t *testing.T) {
+		ctx := config.NewContextInMemory()
+		cmd := gptest.CliCtxWithFlags(ctx, t, nil, "secret")
+		ctx = showParseArgs(ctx, cmd)
+		assert.False(t, IsOnlyClip(ctx), "OnlyClip should be false without -c")
+		assert.False(t, IsClip(ctx), "Clip should be false without -c")
+		assert.Equal(t, -1, GetClipLine(ctx), "ClipLine should be -1 without -c")
 	})
 }
 
 func TestShowAutoClip(t *testing.T) {
 	// make sure we consistently get the unsupported error message
-	ov := clipboard.Unsupported
+	ov := clipboard.ForceUnsupported
 	defer func() {
-		clipboard.Unsupported = ov
+		clipboard.ForceUnsupported = ov
 	}()
-	clipboard.Unsupported = true
+	clipboard.ForceUnsupported = true
 
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithInteractive(ctx, false)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
 	color.NoColor = true
-	buf := &bytes.Buffer{}
-	out.Stdout = buf
-	stdout = buf
+	stdoutBuf := &bytes.Buffer{}
+	stderrBuf := &bytes.Buffer{}
+	out.Stdout = stdoutBuf
+	stdout = stdoutBuf
+	out.Stderr = stderrBuf
+	stderr = stderrBuf
 	defer func() {
 		stdout = os.Stdout
 		out.Stdout = os.Stdout
+		stderr = os.Stderr
+		out.Stderr = os.Stderr
 	}()
 
 	// terminal=false
@@ -240,102 +585,122 @@ func TestShowAutoClip(t *testing.T) {
 		// terminal=false
 		ctx = ctxutil.WithTerminal(ctx, false)
 		// initialize context with config values, also detects if we're running in a terminal
-		ctx = act.Store.WithContext(ctx)
+		ctx = act.Store.WithStoreConfig(ctx)
 
 		c := gptest.CliCtx(ctx, t, "foo")
-		assert.NoError(t, act.Show(c))
-		assert.NotContains(t, buf.String(), "WARNING")
-		assert.Contains(t, buf.String(), "secret")
-		buf.Reset()
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, stderrBuf.String(), "WARNING")
+		assert.Contains(t, stdoutBuf.String(), "secret")
+		stdoutBuf.Reset()
+		stderrBuf.Reset()
 	})
 
 	// gopass show -c foo
 	// -> Copy to clipboard
 	t.Run("gopass show -c foo", func(t *testing.T) {
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "true"}, "foo")
-		assert.NoError(t, act.Show(c))
-		assert.Contains(t, buf.String(), "WARNING")
-		assert.NotContains(t, buf.String(), "secret")
-		buf.Reset()
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, stderrBuf.String(), "WARNING")
+		assert.NotContains(t, stdoutBuf.String(), "secret")
+		stdoutBuf.Reset()
+		stderrBuf.Reset()
 	})
 
 	// gopass show -C foo
 	// -> Copy to clipboard AND print
 	t.Run("gopass show -C foo", func(t *testing.T) {
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"alsoclip": "true"}, "foo")
-		assert.NoError(t, act.Show(c))
-		assert.Contains(t, buf.String(), "WARNING")
-		assert.Contains(t, buf.String(), "secret")
-		assert.Contains(t, buf.String(), "second")
-		buf.Reset()
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, stderrBuf.String(), "WARNING")
+		assert.Contains(t, stdoutBuf.String(), "secret")
+		assert.Contains(t, stdoutBuf.String(), "second")
+		stdoutBuf.Reset()
+		stderrBuf.Reset()
 	})
 
 	// gopass show -f foo
 	// -> ONLY print
 	t.Run("gopass show -f foo", func(t *testing.T) {
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"unsafe": "true"}, "foo")
-		assert.NoError(t, act.Show(c))
-		assert.NotContains(t, buf.String(), "WARNING")
-		assert.Contains(t, buf.String(), "secret")
-		assert.Contains(t, buf.String(), "second")
-		buf.Reset()
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, stderrBuf.String(), "WARNING")
+		assert.Contains(t, stdoutBuf.String(), "secret")
+		assert.Contains(t, stdoutBuf.String(), "second")
+		stdoutBuf.Reset()
+		stderrBuf.Reset()
 	})
 
 	// gopass show foo
 	// -> Copy to clipboard
 	t.Run("gopass show foo", func(t *testing.T) {
 		c := gptest.CliCtx(ctx, t, "foo")
-		assert.NoError(t, act.Show(c))
-		assert.NotContains(t, buf.String(), "WARNING")
-		assert.Contains(t, buf.String(), "secret")
-		buf.Reset()
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, stderrBuf.String(), "WARNING")
+		assert.Contains(t, stdoutBuf.String(), "secret")
+		stdoutBuf.Reset()
+		stderrBuf.Reset()
 	})
 
 	// gopass show -c foo
-	// -> Copy to clipboard
+	// -> Copy to clipboard and DO NOT print
 	t.Run("gopass show -c foo", func(t *testing.T) {
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"clip": "true"}, "foo")
-		assert.NoError(t, act.Show(c))
-		assert.Contains(t, buf.String(), "WARNING")
-		assert.NotContains(t, buf.String(), "secret")
-		buf.Reset()
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, stderrBuf.String(), "WARNING")
+		assert.NotContains(t, stdoutBuf.String(), "secret")
+		stdoutBuf.Reset()
+		stderrBuf.Reset()
 	})
 
 	// gopass show -C foo
 	// -> Copy to clipboard AND print
 	t.Run("gopass show -C foo", func(t *testing.T) {
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"alsoclip": "true"}, "foo")
-		assert.NoError(t, act.Show(c))
-		assert.Contains(t, buf.String(), "WARNING")
-		assert.Contains(t, buf.String(), "secret")
-		assert.Contains(t, buf.String(), "second")
-		buf.Reset()
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, stderrBuf.String(), "WARNING")
+		assert.Contains(t, stdoutBuf.String(), "secret")
+		assert.Contains(t, stdoutBuf.String(), "second")
+		stdoutBuf.Reset()
+		stderrBuf.Reset()
 	})
 
 	// gopass show -f foo
 	// -> ONLY Print
 	t.Run("gopass show -f foo", func(t *testing.T) {
 		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"unsafe": "true"}, "foo")
-		assert.NoError(t, act.Show(c))
-		assert.NotContains(t, buf.String(), "WARNING")
-		assert.Contains(t, buf.String(), "secret")
-		assert.Contains(t, buf.String(), "second")
-		buf.Reset()
+		require.NoError(t, act.Show(ctx, c))
+		assert.NotContains(t, stderrBuf.String(), "WARNING")
+		assert.Contains(t, stdoutBuf.String(), "secret")
+		assert.Contains(t, stdoutBuf.String(), "second")
+		stdoutBuf.Reset()
+		stderrBuf.Reset()
+	})
+
+	// gopass show foo with show.autoclip and show.safecontent true
+	// -> ONLY Copy to clipboard
+	t.Run("show foo with safecontent and autoclip enabled", func(t *testing.T) {
+		require.NoError(t, act.cfg.Set("", "show.autoclip", "true"))
+		require.NoError(t, act.cfg.Set("", "show.safecontent", "true"))
+		c := gptest.CliCtx(ctx, t, "foo")
+		require.NoError(t, act.Show(ctx, c))
+		assert.Contains(t, stderrBuf.String(), "WARNING")
+		assert.NotContains(t, stdoutBuf.String(), "secret")
+		stdoutBuf.Reset()
 	})
 }
 
 func TestShowHandleRevision(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithTerminal(ctx, false)
 	ctx = ctxutil.WithInteractive(ctx, false)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
 	color.NoColor = true
 	buf := &bytes.Buffer{}
@@ -349,20 +714,20 @@ func TestShowHandleRevision(t *testing.T) {
 	t.Run("show foo", func(t *testing.T) {
 		defer buf.Reset()
 		c := gptest.CliCtx(ctx, t)
-		assert.NoError(t, act.showHandleRevision(ctx, c, "foo", "HEAD"))
+		require.NoError(t, act.showHandleRevision(ctx, c, "foo", "HEAD"))
 	})
 }
 
 func TestShowHandleError(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithTerminal(ctx, false)
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
 	color.NoColor = true
 	buf := &bytes.Buffer{}
@@ -375,22 +740,67 @@ func TestShowHandleError(t *testing.T) {
 
 	// show foo
 	c := gptest.CliCtx(ctx, t)
-	assert.Error(t, act.showHandleError(ctx, c, "foo", false, fmt.Errorf("test")))
+	require.Error(t, act.showHandleError(ctx, c, "foo", false, fmt.Errorf("test")))
 	buf.Reset()
+}
+
+func TestShowHandleErrorFuzzySearchToggle(t *testing.T) {
+	u := gptest.NewUnitTester(t)
+
+	ctx := config.NewContextInMemory()
+	ctx = ctxutil.WithAlwaysYes(ctx, true)
+	ctx = ctxutil.WithTerminal(ctx, true)
+	act, err := newMock(ctx, u.StoreDir(""))
+	require.NoError(t, err)
+	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
+
+	called := false
+	act.secrets.findFuzzyFn = func(context.Context, *cli.Command) error {
+		called = true
+
+		return nil
+	}
+
+	t.Run("default config enables fuzzy search", func(t *testing.T) {
+		called = false
+		c := gptest.CliCtx(ctx, t)
+
+		require.NoError(t, act.showHandleError(ctx, c, "missing", true, store.ErrNotFound))
+		assert.True(t, called)
+	})
+
+	t.Run("show.fuzzysearch=false disables fuzzy search", func(t *testing.T) {
+		called = false
+		require.NoError(t, act.cfg.Set("", "show.fuzzysearch", "false"))
+		c := gptest.CliCtx(ctx, t)
+
+		require.Error(t, act.showHandleError(ctx, c, "missing", true, store.ErrNotFound))
+		assert.False(t, called)
+	})
+
+	t.Run("--nofuzzysearch disables fuzzy search for one invocation", func(t *testing.T) {
+		called = false
+		require.NoError(t, act.cfg.Set("", "show.fuzzysearch", "true"))
+		c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"nofuzzysearch": "true"})
+
+		require.Error(t, act.showHandleError(ctx, c, "missing", true, store.ErrNotFound))
+		assert.False(t, called)
+	})
 }
 
 func TestShowPrintQR(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithTerminal(ctx, false)
 	ctx = ctxutil.WithInteractive(ctx, false)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx) //nolint:ineffassign,staticcheck
 
 	color.NoColor = true
 	buf := &bytes.Buffer{}
@@ -401,6 +811,29 @@ func TestShowPrintQR(t *testing.T) {
 		out.Stdout = os.Stdout
 	}()
 
-	assert.NoError(t, act.showPrintQR("foo", "bar"))
+	require.NoError(t, act.showPrintQR("foo", "bar"))
 	buf.Reset()
+}
+
+func TestShowHasAliasDomain(t *testing.T) {
+	u := gptest.NewUnitTester(t)
+
+	ctx := config.NewContextInMemory()
+	ctx = ctxutil.WithAlwaysYes(ctx, true)
+	ctx = ctxutil.WithTerminal(ctx, false)
+	ctx = ctxutil.WithInteractive(ctx, false)
+
+	act, err := newMock(ctx, u.StoreDir(""))
+	require.NoError(t, err)
+	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
+
+	sec := secrets.NewAKV()
+	sec.SetPassword("foo")
+	require.NoError(t, act.Store.Set(ctx, "websites/foo.de/user", sec))
+
+	require.NoError(t, act.cfg.Set("", "domain-alias.foo.de.insteadof", "foo.com"))
+
+	alias := act.hasAliasDomain(ctx, "websites/foo.com/user")
+	assert.Equal(t, "websites/foo.de/user", alias)
 }

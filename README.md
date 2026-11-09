@@ -2,77 +2,143 @@
     <img src="docs/logo.png" height="250" alt="gopass Gopher by Vincent Leinweber, remixed from the Renée French original Gopher" title="gopass Gopher by Vincent Leinweber, remixed from the Renée French original Gopher" />
 </p>
 
-# gopass
+# Overview
 
-[![Build Status](https://travis-ci.org/gopasspw/gopass.svg?branch=master)](https://travis-ci.org/gopasspw/gopass)
-[![Packaging status](https://repology.org/badge/tiny-repos/gopass.svg)](https://repology.org/project/gopass/versions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/gopasspw/gopass)](https://goreportcard.com/report/github.com/gopasspw/gopass)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/gopasspw/gopass/badge)](https://securityscorecards.dev/viewer/?uri=github.com/gopasspw/gopass)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/gopasspw/gopass/build.yml?branch=master)](https://github.com/gopasspw/gopass/actions/workflows/build.yml?query=branch%3Amaster)
+[![Lint Status](https://img.shields.io/github/actions/workflow/status/gopasspw/gopass/golangci-lint.yml?branch=master&label=lint)](https://github.com/gopasspw/gopass/actions/workflows/golangci-lint.yml?query=branch%3Amaster)
+[![Packaging Status](https://repology.org/badge/tiny-repos/gopass-gopasspw.svg)](https://repology.org/project/gopass-gopasspw/versions)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/gopasspw/gopass/blob/master/LICENSE)
 [![Github All Releases](https://img.shields.io/github/downloads/gopasspw/gopass/total.svg)](https://github.com/gopasspw/gopass/releases)
-[![codecov](https://codecov.io/gh/gopasspw/gopass/branch/master/graph/badge.svg)](https://codecov.io/gh/gopasspw/gopass)
-[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/1899/badge)](https://bestpractices.coreinfrastructure.org/projects/1899)
-[![Gopass Slack](https://img.shields.io/badge/%23gopass-Slack-brightgreen)](https://docs.google.com/forms/d/e/1FAIpQLScxOPX_OLDaG5ak2E1kNdcFw9fJvPCr8xUaPGLyW8cyNUEnJw/viewform?usp=sf_link)
+[![Gopass Slack](https://img.shields.io/badge/%23gopass-Slack-brightgreen)](https://join.slack.com/t/gopassworkspace/shared_invite/zt-17jl74b5x-U1OUW4ts4AQ7eAf2V4QaaQ)
 
-## Introduction
+> The slightly more awesome standard UNIX password manager for teams.
 
-gopass is a password manager for the command line written in Go. It supports all major operating systems (Linux, MacOS, BSD) as well as Windows.
+Manage your credentials with ease. In a globally distributed team, on multiple devices or fully offline on an air-gapped machine.
 
-For detailed usage and installation instructions please check out our [documentation](docs/).
+- **Works everywhere** - The same user experience on Linux, macOS, *BSD or Windows
+- **Built for teams** - Built from our experience working in distributed development teams
+- **Full autonomy** - No network connectivity required, unless you want it
 
-## Design Principles
+# How Does It Work?
 
-Gopass is a versatile command line based password manager that is being developed with the following principles in mind:
+Gopass is a drop-in replacement for pass, the standard UNIX password manager.
+By default your credentials are encrypted with GPG and versioned in git. This can be customized easily.
+Other backends for encryption (e.g. age) and storage (e.g. fossil) are also available.
+The primary interface is the command line, making it an excellent choice for CLI fans, CI/CD systems or
+anything you can hook it up with. Gopass can also integrate with your browser so you can largely avoid
+the command line - if you want.
 
-- **Easy**: For technical users (i.e. those who are used to the command line) it should be easy to get started with gopass.
-- **Secure**: Security is hard. We aim to make it as easy as possible while still providing a good level of protection against common adversaries. *Caution*: If your personal threat level is very high, we might not offer a good tool for you.
-- **Extensible**: While Gopass includes a fair amount of useful features, we can't cover every use-case. To support more special use cases we want to provide a clean and simple API to integration gopass into your own binaries.
+# Installation
 
-## Screenshot
+## Necessary prerequisites for running `gopass`
 
-![screenshot](docs/showcase.png)
+`gopass` can operate without any dependencies but most users will use it with `gpg` and `git`.
+An external editor is required to use `gopass edit`.
 
-## Features
+## Installation through package managers
 
-Please see [docs/features.md](https://github.com/gopasspw/gopass/blob/master/docs/features.md) for an extensive list of all features along with several usage examples. Some examples are available in our
-[example password store](https://github.com/gopasspw/password-store-example).
+### [Homebrew](https://brew.sh) (Linux/macOS)
 
-| **Feature**                 | **State**     | **Description**                                                   |
-| --------------------------- | ------------- | ----------------------------------------------------------------- |
-| Secure secret storage       | *stable*      | Securely storing encrypted secrets                                |
-| Recipient management        | *beta*        | Easily manage multiple users of each store                        |
-| Multiple stores             | *stable*      | Mount multiple stores in your root store, like file systems       |
-| password quality assistance | *beta*        | Checks existing or new passwords for common flaws                 |
-| password leak checker       | *integration* | Perform **offline** checks against known leaked passwords         |
-| PAGER support               | *stable*      | Automatically invoke a pager on long output                       |
-| JSON API                    | *integration* | Allow gopass to be used as a native extension for browser plugins |
-| Automatic fuzzy search      | *stable*      | Automatically search for matching store entries if a literal entry was not found |
-| gopass sync                 | *stable*      | Easy to use syncing of remote repos and GPG keys                  |
-| Desktop Notifications       | *stable*      | Display desktop notifications and completing long running operations |
-| REPL                        | *beta*        | Integrated Read-Eval-Print-Loop shell with autocompletion. |
-| Extensions                  |               | Extend gopass with custom commands using our API                  |
+[![homebrew version](https://img.shields.io/homebrew/v/gopass)](https://github.com/Homebrew/homebrew-core/blob/master/Formula/gopass.rb)
 
-## Installation
-
-Please see [docs/setup.md](https://github.com/gopasspw/gopass/blob/master/docs/setup.md).
-
-If you have [Go](https://golang.org/) 1.16 (or greater) installed:
-
-```bash
-go get github.com/gopasspw/gopass
+```shell
+brew install gopass
 ```
 
-WARNING: Please prefer releases, unless you want to contribute to the
-development of gopass. The master branch might not be very well tested and
-can contain breaking changes without further notice.
+### [MacPorts](https://www.macports.org) (macOS)
 
-## Getting Started
+[![macports version](https://repology.org/badge/version-for-repo/macports/gopass-gopasspw.svg)](https://ports.macports.org/port/gopass/)
 
-Either initialize a new git repository or clone an existing one.
-
-### New password store
-
+```shell
+sudo port install gopass
 ```
-$ gopass setup
+
+### Debian (Ubuntu, Debian, Raspbian, ...)
+
+**Warning**: Do not install the `gopass` package from the official repositories. That is a completely different project that has no relation to us.
+
+```shell
+curl https://packages.gopass.pw/repos/gopass/gopass-archive-keyring.gpg | sudo tee /usr/share/keyrings/gopass-archive-keyring.gpg >/dev/null
+cat << EOF | sudo tee /etc/apt/sources.list.d/gopass.sources
+Types: deb
+URIs: https://packages.gopass.pw/repos/gopass
+Suites: stable
+Architectures: all amd64 arm64 armhf
+Components: main
+Signed-By: /usr/share/keyrings/gopass-archive-keyring.gpg
+EOF
+sudo apt update
+sudo apt install gopass gopass-archive-keyring
+```
+
+### Fedora / RedHat / CentOS
+
+[![Fedora version](https://img.shields.io/fedora/v/gopass)](https://packages.fedoraproject.org/pkgs/gopass/gopass/)
+
+```shell
+dnf install gopass
+```
+
+Note: You might need to run `dnf copr enable daftaupe/gopass` first.
+
+### Arch Linux
+
+[![Arch version](https://img.shields.io/archlinux/v/extra/x86_64/gopass)](https://archlinux.org/packages/extra/x86_64/gopass/)
+
+```shell
+pacman -S gopass
+```
+
+### Windows
+
+[![Scoop version](https://img.shields.io/scoop/v/gopass)](https://github.com/ScoopInstaller/Main/blob/master/bucket/gopass.json)
+
+```shell
+# WinGet
+winget install -e --source winget --id Git.Git
+winget install -e --source winget --id GnuPG.Gpg4win
+winget install -e --source winget --id gopass.gopass
+# Chocolatey
+choco install gpg4win
+choco install gopass
+# Alternatively
+scoop install gopass
+```
+
+### FreeBSD / OpenBSD
+
+```shell
+cd /usr/ports/security/gopass
+make install
+```
+
+### Alpine Linux
+
+```shell
+apk add gopass
+```
+
+## Other installation options
+
+Please see [docs/setup.md](https://github.com/gopasspw/gopass/blob/master/docs/setup.md) for other options.
+
+### From Source
+
+```shell
+go install github.com/gopasspw/gopass@latest
+```
+
+### Manual download
+
+Download the [latest release](https://github.com/gopasspw/gopass/releases/latest) and add the binary to your PATH.
+
+# Quick start guide
+
+Initialize a new `gopass` configuration:
+
+```shell
+gopass setup
 
    __     _    _ _      _ _   ___   ___
  /'_ '\ /'_'\ ( '_'\  /'_' )/',__)/',__)
@@ -93,93 +159,78 @@ Please enter the git remote for your shared store []: git@gitlab.example.org:joh
 ✅ Configured
 ```
 
-Hint: `gopass setup` will use `gpg` encryption and `git` storage by default.
+By default `gopass setup` will use `gpg` encryption and `git` storage. This will create a new password store in `$HOME/.local/share/gopass/stores/root` and a configuration in `$HOME/.config/gopass/config` using `gpg` encryption and `git` for versioned storage. Users can override these with e.g. `--crypto=age` to use `age` encryption instead or opt out of using a versioned store with `--storage=fs`.
 
-### Existing password store
+An existing store can be cloned with e.g. `gopass clone git@gitlab.example.org:john/passwords.git`.
 
-```
-$ gopass clone git@gitlab.example.org:john/passwords.git
+Create a new secret:
 
-   __     _    _ _      _ _   ___   ___
- /'_ '\ /'_'\ ( '_'\  /'_' )/',__)/',__)
-( (_) |( (_) )| (_) )( (_| |\__, \\__, \
-'\__  |'\___/'| ,__/''\__,_)(____/(____/
-( )_) |       | |
- \___/'       (_)
-
-🌟 Welcome to gopass!
-🌟 Cloning an existing password store from "git@gitlab.example.org:john/passwords.git" ...
-⚠ Cloning git repository "git@gitlab.example.org:john/passwords.git" to "/home/john/.local/share/gopass/stores/root" ...
-⚠ Configuring git repository ...
-🎩 Gathering information for the git repository ...
-🚶 What is your name? [John Doe]: 
-📧 What is your email? [john.doe@example.org]: 
-Your password store is ready to use! Have a look around: `gopass list`
+```shell
+gopass create
 ```
 
-## Upgrade
+List all existing secrets:
 
-To use the self-updater run:
-```bash
-gopass update
+```shell
+gopass ls
 ```
 
-or to upgrade with Go installed, run:
-```bash
-go get -u github.com/gopasspw/gopass
+Copy an existing password to the clipboard:
+
+```shell
+gopass show -c foo
 ```
 
-Otherwise, use the setup docs mentioned in the installation section to reinstall the latest version.
+Remove an existing secret:
 
-## Development
+```shell
+gopass rm foo
+```
 
-This project uses [GitHub Flow](https://guides.github.com/introduction/flow/). In other words, create feature branches from master, open an PR against master, and rebase onto master if necessary.
+Other examples:
 
-We aim for compatibility with the [latest stable Go Release](https://golang.org/dl/) only.
+```shell
+# Command structure
+gopass [<command>] [options] [args]
+# Shortcut for gopass show [<key>]
+gopass [<key>]
 
-While this project is maintained by volunteers in their free time we aim to triage issues weekly and release a new version at least every quarter.
+# Enter the gopass REPL
+gopass
 
-## Credit & License
+# Find all entries matching the search string
+gopass find github
 
-gopass is licensed under the terms of the MIT license. You can find the complete text in `LICENSE`.
+# List your store
+gopass ls
 
-Please refer to the Git commit log for a complete list of contributors.
+# List all mounts
+gopass mounts
 
-## Community
+# List all recipients
+gopass recipients
 
-gopass is developed in the open. Here are some of the channels we use to communicate and contribute:
+# Sync with all remotes
+gopass sync
 
-* Issue tracker: Use the [GitHub issue tracker](https://github.com/gopasspw/gopass/issues) to file bugs and feature requests.
+# Setup a new store
+gopass setup
+```
 
-## Integrations
+## Screenshot
 
-- [gopassbridge](https://github.com/gopasspw/gopassbridge): Browser plugin for Firefox, Chrome and other Chromium based browsers
-- [kubectl gopass](https://github.com/gopasspw/kubectl-gopass): Kubernetes / kubectl plugin to support reading and writing secrets directly from/to gopass.
-- [gopass alfred](https://github.com/gopasspw/gopass-alfred): Alfred workflow to use gopass from the Alfred Mac launcher
-- [git-credential-gopass](https://github.com/gopasspw/git-credential-gopass): Integrate gopass as an git-credential helper
-- [gopass-hibp](https://github.com/gopasspw/gopass-hibp): haveibeenpwned.com leak checker
-- [gopass-jsonapi](https://github.com/gopasspw/gopass-jsonapi): native messaging for browser plugins, e.g. gopassbridge
-- [gopass-summon-prover](https://github.com/gopasspw/gopass-summon-provider): gopass as a summon provider
-- [`terraform-provider-gopass`](https://github.com/camptocamp/terraform-provider-pass): a Terraform provider to interact with gopass
-- [chezmoi](https://github.com/twpayne/chezmoi): dotfile manager with gopass support
+![screenshot](docs/showcase.png)
 
-## Mobile apps
+## Support
 
-- [Pass - Password Store](https://apps.apple.com/us/app/pass-password-store/id1205820573) - iOS, [source code](https://github.com/mssun/passforios), [supports only 1 repository now](https://github.com/mssun/passforios/issues/88)
-- [Password Store](https://play.google.com/store/apps/details?id=dev.msfjarvis.aps) - Android
+Please ask on [Slack](https://join.slack.com/t/gopassworkspace/shared_invite/zt-17jl74b5x-U1OUW4ts4AQ7eAf2V4QaaQ).
 
 ## Contributing
 
-We welcome any contributions. Please see the [CONTRIBUTING.md](https://github.com/gopasspw/gopass/blob/master/CONTRIBUTING.md) file for instructions on how to submit changes.
+We welcome any contributions. Please see [CONTRIBUTING.md](https://github.com/gopasspw/gopass/blob/master/CONTRIBUTING.md) for more information.
 
-## Further Documentation
+## Credit & License
 
-* [Security, Known Limitations, and Caveats](https://github.com/gopasspw/gopass/blob/master/docs/security.md)
-* [Configuration](https://github.com/gopasspw/gopass/blob/master/docs/config.md)
-* [FAQ](https://github.com/gopasspw/gopass/blob/master/docs/faq.md)
-* [JSON API](https://github.com/gopasspw/gopass-jsonapi)
-* [Gopass as Summon provider](https://github.com/gopasspw/gopass-summon-provider)
+gopass is licensed under the terms of the MIT license. You can find the complete text in [`LICENSE`](https://github.com/gopasspw/gopass/blob/master/LICENSE).
 
-## External Documentation
-* [gopass cheat sheet](https://woile.github.io/gopass-cheat-sheet/) ([source on github](https://github.com/Woile/gopass-cheat-sheet))
-* [gopass presentation](https://woile.github.io/gopass-presentation/) ([source on github](https://github.com/Woile/gopass-presentation))
+Please refer to our [Contributors](https://github.com/gopasspw/gopass/graphs/contributors) page for a complete list of our contributors.

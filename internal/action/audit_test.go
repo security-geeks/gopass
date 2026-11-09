@@ -2,29 +2,29 @@ package action
 
 import (
 	"bytes"
-	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/gopass/secrets"
 	"github.com/gopasspw/gopass/tests/gptest"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAudit(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithHidden(ctx, true)
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
 	buf := &bytes.Buffer{}
 	out.Stdout = buf
@@ -34,28 +34,73 @@ func TestAudit(t *testing.T) {
 		stdout = os.Stdout
 	}()
 
-	t.Run("expect audit complaints on very weak passwords", func(t *testing.T) {
-		sec := &secrets.Plain{}
+	t.Run("expect audit to complains on very weak passwords", func(t *testing.T) {
+		sec := secrets.NewAKV()
 		sec.SetPassword("123")
-		assert.NoError(t, act.Store.Set(ctx, "bar", sec))
-		assert.NoError(t, act.Store.Set(ctx, "baz", sec))
+		require.NoError(t, act.Store.Set(ctx, "bar", sec))
+		require.NoError(t, act.Store.Set(ctx, "baz", sec))
 
-		assert.Error(t, act.Audit(gptest.CliCtx(ctx, t)))
+		require.Error(t, act.Audit(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"full": "true"})), buf.String())
 		buf.Reset()
 	})
 
-	t.Run("test with filter and very passwords", func(t *testing.T) {
+	t.Run("test with filter", func(t *testing.T) {
 		c := gptest.CliCtx(ctx, t, "foo")
-		assert.Error(t, act.Audit(c))
+		require.Error(t, act.Audit(ctx, c))
 		buf.Reset()
 	})
 
 	t.Run("test empty store", func(t *testing.T) {
 		for _, v := range []string{"foo", "bar", "baz"} {
-			assert.NoError(t, act.Store.Delete(ctx, v))
+			require.NoError(t, act.Store.Delete(ctx, v))
 		}
-		assert.NoError(t, act.Audit(gptest.CliCtx(ctx, t)))
+		require.NoError(t, act.Audit(ctx, gptest.CliCtx(ctx, t)))
 		assert.Contains(t, "No secrets found", buf.String())
 		buf.Reset()
+	})
+
+	t.Run("audit --format json produces valid JSON", func(t *testing.T) {
+		sec := secrets.NewAKV()
+		sec.SetPassword("hunter2")
+		require.NoError(t, act.Store.Set(ctx, "jsontest", sec))
+		defer func() { _ = act.Store.Delete(ctx, "jsontest") }()
+
+		outFile := t.TempDir() + "/report.json"
+		require.NoError(t, act.Audit(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"format": "json", "output-file": outFile})))
+		buf.Reset()
+
+		data, err := os.ReadFile(outFile)
+		require.NoError(t, err)
+		var report map[string]any
+		require.NoError(t, json.Unmarshal(data, &report))
+		assert.Contains(t, report, "secrets")
+		assert.Contains(t, report, "duration")
+	})
+
+	t.Run("audit skips symlinked secrets", func(t *testing.T) {
+		sec := secrets.NewAKV()
+		sec.SetPassword("Dk3!vq9#Lm2@xZ7$")
+		require.NoError(t, act.Store.Set(ctx, "atlassian.com", sec))
+		require.NoError(t, act.Store.Link(ctx, "atlassian.com", "trello.com"))
+		defer func() {
+			_ = act.Store.Delete(ctx, "trello.com")
+			_ = act.Store.Delete(ctx, "atlassian.com")
+		}()
+
+		outFile := t.TempDir() + "/report.json"
+		require.NoError(t, act.Audit(ctx, gptest.CliCtxWithFlags(ctx, t, map[string]string{"format": "json", "output-file": outFile})))
+		buf.Reset()
+
+		data, err := os.ReadFile(outFile)
+		require.NoError(t, err)
+		var report struct {
+			Secrets map[string]struct {
+				Findings map[string]any `json:"findings"`
+			} `json:"secrets"`
+		}
+		require.NoError(t, json.Unmarshal(data, &report))
+		assert.NotContains(t, report.Secrets, "trello.com")
+		require.Contains(t, report.Secrets, "atlassian.com")
+		assert.NotContains(t, report.Secrets["atlassian.com"].Findings, "duplicates")
 	})
 }

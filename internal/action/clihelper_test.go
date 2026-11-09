@@ -1,11 +1,12 @@
 package action
 
 import (
-	"flag"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/urfave/cli/v2"
+	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -64,21 +65,28 @@ func TestParseArgs(t *testing.T) {
 			kvOut:  map[string]string{"baz": "bam"},
 		},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			if tc.argOut == nil {
 				tc.argOut = argList{}
 			}
+
 			if tc.kvOut == nil {
 				tc.kvOut = map[string]string{}
 			}
-			app := cli.NewApp()
-			fs := flag.NewFlagSet("default", flag.ContinueOnError)
-			assert.NoError(t, fs.Parse(tc.argIn), tc.name)
-			args, kvps := parseArgs(cli.NewContext(app, fs, nil))
-			assert.Equal(t, tc.argOut, args, tc.name)
-			assert.Equal(t, tc.kvOut, kvps, tc.name)
+
+			var gotArgs argList
+			var gotKVPs map[string]string
+
+			cmd := &cli.Command{
+				Action: func(c context.Context, cmd *cli.Command) error {
+					gotArgs, gotKVPs = parseArgs(c, cmd)
+
+					return nil
+				},
+			}
+			require.NoError(t, cmd.Run(context.Background(), append([]string{"test"}, tc.argIn...)), tc.name)
+			assert.Equal(t, tc.argOut, gotArgs, tc.name)
+			assert.Equal(t, tc.kvOut, gotKVPs, tc.name)
 		})
 	}
 }

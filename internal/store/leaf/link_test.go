@@ -1,34 +1,27 @@
 package leaf
 
 import (
-	"context"
-	"os"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/pkg/gopass/secrets"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLink(t *testing.T) {
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 
-	tempdir, err := os.MkdirTemp("", "gopass-")
-	require.NoError(t, err)
-	defer func() {
-		_ = os.RemoveAll(tempdir)
-	}()
-	t.Logf(tempdir)
-
-	s, err := createSubStore(tempdir)
+	s, err := createSubStore(t)
 	require.NoError(t, err)
 
-	sec := &secrets.Plain{}
+	sec := secrets.NewAKV()
 	sec.SetPassword("foo")
-	sec.WriteString("bar")
+	_, err = sec.Write([]byte("bar"))
+	require.NoError(t, err)
 	require.NoError(t, s.Set(ctx, "zab/zab", sec))
 
-	assert.NoError(t, s.Link(ctx, "zab/zab", "foo/123"))
+	require.NoError(t, s.Link(ctx, "zab/zab", "foo/123"))
 
 	p, err := s.Get(ctx, "foo/123")
 	require.NoError(t, err)

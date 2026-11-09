@@ -1,10 +1,10 @@
 package root
 
 import (
-	"context"
 	"testing"
 
 	"github.com/fatih/color"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/tests/gptest"
 	"github.com/stretchr/testify/assert"
@@ -13,9 +13,8 @@ import (
 
 func TestRCS(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithHidden(ctx, true)
 	color.NoColor = true
@@ -23,9 +22,9 @@ func TestRCS(t *testing.T) {
 	rs, err := createRootStore(ctx, u)
 	require.NoError(t, err)
 
-	assert.NoError(t, rs.RCSStatus(ctx, ""))
+	require.Error(t, rs.RCSStatus(ctx, ""))
 
 	revs, err := rs.ListRevisions(ctx, "foo")
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(revs))
+	require.Error(t, err)
+	assert.Len(t, revs, 1)
 }

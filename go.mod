@@ -1,54 +1,115 @@
 module github.com/gopasspw/gopass
 
-go 1.12
+go 1.26.0
 
 require (
-	filippo.io/age v1.0.0-rc.1
-	github.com/atotto/clipboard v0.1.4
+	filippo.io/age v1.3.2
+	github.com/ProtonMail/go-crypto v1.5.2
 	github.com/blang/semver/v4 v4.0.0
 	github.com/caspr-io/yamlpath v0.0.0-20200722075116-502e8d113a9b
-	github.com/cenkalti/backoff v2.2.1+incompatible
-	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
-	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/fatih/color v1.10.0
-	github.com/godbus/dbus v0.0.0-20190623212516-8a1682060722
+	github.com/cenkalti/backoff/v4 v4.3.0
+	github.com/creack/pty v1.1.24
+	github.com/dustin/go-humanize v1.1.0
+	github.com/ergochat/readline v0.1.3
+	github.com/fatih/color v1.19.0
+	github.com/go-git/go-git/v5 v5.19.3
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/gokyle/twofactor v1.0.1
-	github.com/golang/protobuf v1.5.2 // indirect
-	github.com/google/go-cmp v0.5.5
-	github.com/google/go-github v17.0.0+incompatible
-	github.com/google/go-github/v33 v33.0.0
-	github.com/google/go-querystring v1.1.0 // indirect
-	github.com/gopasspw/pinentry v0.0.2
-	github.com/hashicorp/errwrap v1.1.0 // indirect
-	github.com/hashicorp/go-multierror v1.1.1
-	github.com/hashicorp/golang-lru v0.5.4
-	github.com/jsimonetti/pwscheme v0.0.0-20160922125227-76804708ecad
+	github.com/google/go-cmp v0.7.0
+	github.com/google/go-github/v61 v61.0.0
+	github.com/gopasspw/clipboard v0.0.5
+	github.com/gopasspw/gitconfig v0.0.5
+	github.com/hashicorp/golang-lru/v2 v2.0.7
+	github.com/jsimonetti/pwscheme v0.0.0-20220922140336-67a4d090f150
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
-	github.com/kr/text v0.2.0 // indirect
-	github.com/martinhoefling/goxkcdpwgen v0.0.0-20190331205820-7dc3d102eca3
-	github.com/mattn/go-colorable v0.1.8
-	github.com/mattn/go-isatty v0.0.12
-	github.com/mitchellh/go-homedir v1.1.0
+	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
+	github.com/makiuchi-d/gozxing v0.1.1
+	github.com/martinhoefling/goxkcdpwgen v0.1.2-0.20231122080842-e51aa57005ca
+	github.com/mattn/go-colorable v0.1.16
+	github.com/mattn/go-isatty v0.0.24
+	github.com/mattn/go-tty v0.0.8
 	github.com/mitchellh/go-ps v1.0.0
 	github.com/muesli/crunchy v0.4.0
-	github.com/nbutton23/zxcvbn-go v0.0.0-20210217022336-fa2cb2858354
-	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
-	github.com/pkg/errors v0.9.1 // indirect
-	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/schollz/closestmatch v0.0.0-20190308193919-1fbe626be92e
+	github.com/noborus/ov v0.55.0
+	github.com/pquerna/otp v1.5.0
+	github.com/schollz/closestmatch v2.1.0+incompatible
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
-	github.com/stretchr/testify v1.7.0
-	github.com/urfave/cli/v2 v2.3.0
-	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
-	golang.org/x/crypto v0.0.0-20210415154028-4f45737414dc
-	golang.org/x/net v0.0.0-20210415231046-e915ea6b2b7d
-	golang.org/x/oauth2 v0.0.0-20210413134643-5e61552d6c78
-	golang.org/x/sys v0.0.0-20210419170143-37df388d1f33
-	golang.org/x/term v0.0.0-20210406210042-72f3dc4e9b72
-	google.golang.org/appengine v1.6.7 // indirect
-	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
-	gotest.tools v2.2.0+incompatible
+	github.com/stretchr/testify v1.12.1
+	github.com/twpayne/go-pinentry/v4 v4.0.1
+	github.com/urfave/cli/v3 v3.14.0
+	github.com/xhit/go-str2duration/v2 v2.2.0
+	github.com/zalando/go-keyring v0.2.8
+	github.com/zeebo/blake3 v0.2.4
+	go.yaml.in/yaml/v3 v3.0.6
+	golang.org/x/crypto v0.58.0
+	golang.org/x/mod v0.42.0
+	golang.org/x/net v0.62.0
+	golang.org/x/oauth2 v0.37.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
+	golang.org/x/tools v0.52.0
+)
+
+require (
+	codeberg.org/tslocum/cbind v0.1.9 // indirect
+	dario.cat/mergo v1.0.0 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
+	filippo.io/nistec v0.0.4 // indirect
+	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/boombuler/barcode v1.1.0 // indirect
+	github.com/clipperhouse/displaywidth v0.11.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
+	github.com/cloudflare/circl v1.6.5 // indirect
+	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/ebitengine/purego v0.11.1 // indirect
+	github.com/emirpasic/gods v1.18.1 // indirect
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
+	github.com/gdamore/encoding v1.0.1 // indirect
+	github.com/gdamore/tcell/v3 v3.5.0 // indirect
+	github.com/gen2brain/shm v0.1.1 // indirect
+	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
+	github.com/go-git/go-billy/v5 v5.9.2 // indirect
+	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+	github.com/gobwas/glob v1.0.0 // indirect
+	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
+	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
+	github.com/jezek/xgb v1.1.1 // indirect
+	github.com/jwalton/gchalk v1.3.0 // indirect
+	github.com/jwalton/go-supportscolor v1.2.0 // indirect
+	github.com/kevinburke/ssh_config v1.2.0 // indirect
+	github.com/klauspost/compress v1.20.1 // indirect
+	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
+	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
+	github.com/noborus/guesswidth v0.5.0 // indirect
+	github.com/noborus/tcellansi v0.4.1 // indirect
+	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
+	github.com/pierrec/lz4/v4 v4.1.31 // indirect
+	github.com/pjbgf/sha1cd v0.7.0 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/sagikazarmark/locafero v0.12.0 // indirect
+	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
+	github.com/skeema/knownhosts v1.3.1 // indirect
+	github.com/spf13/afero v1.15.0 // indirect
+	github.com/spf13/cast v1.10.0 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/spf13/viper v1.21.0 // indirect
+	github.com/subosito/gotenv v1.6.0 // indirect
+	github.com/ulikunitz/xz v0.5.17 // indirect
+	github.com/xanzy/ssh-agent v0.3.3 // indirect
+	github.com/xrash/smetrics v0.0.0-20250705151800-55b8f293f342 // indirect
+	golang.design/x/clipboard v0.11.0 // indirect
+	golang.design/x/x11 v0.2.0 // indirect
+	golang.org/x/exp/shiny v0.0.0-20260908205506-85c1c2202aba // indirect
+	golang.org/x/image v0.46.0 // indirect
+	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
+	gopkg.in/warnings.v0 v0.1.2 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )

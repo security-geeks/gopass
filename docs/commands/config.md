@@ -6,12 +6,14 @@ Note: To manage mounts use `gopass mounts`.
 
 ## Synopsis
 
-```
-$ gopass config
-$ gopass config autoclip
-$ gopass config autoclip false
+```bash
+gopass config
+gopass config generate.autoclip
+gopass config generate.autoclip false
 ```
 
 ## Flags
 
-None.
+| Flag      | Description                                              |
+|-----------|----------------------------------------------------------|
+| `--store` | Read or write options for the given sub-store.           |

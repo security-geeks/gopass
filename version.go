@@ -9,18 +9,16 @@ import (
 func getVersion() semver.Version {
 	sv, err := semver.Parse(strings.TrimPrefix(version, "v"))
 	if err == nil {
-		if commit != "" {
-			sv.Build = []string{commit}
-		}
 		return sv
 	}
+
 	return semver.Version{
 		Major: 1,
-		Minor: 12,
-		Patch: 5,
+		Minor: 17,
+		Patch: 4,
 		Pre: []semver.PRVersion{
 			{VersionStr: "git"},
 		},
-		Build: []string{"HEAD"},
+		Build: []string{"c5885991"},
 	}
 }

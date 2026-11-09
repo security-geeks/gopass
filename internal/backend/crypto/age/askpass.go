@@ -3,98 +3,193 @@ package age
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gopasspw/gopass/internal/cache"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
+	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/pkg/debug"
 	"github.com/gopasspw/gopass/pkg/pinentry/cli"
-	"github.com/gopasspw/pinentry"
+	"github.com/gopasspw/gopass/pkg/termio"
+	"github.com/twpayne/go-pinentry/v4"
+	"github.com/zalando/go-keyring"
 )
-
-type piner interface {
-	Close()
-	Confirm() bool
-	Set(string, string) error
-	GetPin() ([]byte, error)
-}
 
 type cacher interface {
 	Get(string) (string, bool)
-	Set(string, string)
+	Set(context.Context, string, string)
 	Remove(string)
 	Purge()
 }
 
-type askPass struct {
-	testing  bool
-	cache    cacher
-	pinentry func() (piner, error)
+type osKeyring struct {
+	knownKeys map[string]bool
 }
 
-var (
-	// DefaultAskPass is the default password cache
-	DefaultAskPass = newAskPass()
-)
-
-func newAskPass() *askPass {
-	return &askPass{
-		cache: cache.NewInMemTTL(time.Hour, 24*time.Hour),
-		pinentry: func() (piner, error) {
-			p, err := pinentry.New()
-			if err == nil {
-				return p, nil
-			}
-			debug.Log("Pinentry not found: %q", err)
-			return cli.New()
-		},
+func newOsKeyring() *osKeyring {
+	return &osKeyring{
+		knownKeys: make(map[string]bool),
 	}
+}
+
+func (o *osKeyring) Get(key string) (string, bool) {
+	sec, err := keyring.Get("gopass", key)
+	if err != nil {
+		debug.Log("failed to get %s from OS keyring: %v", key, err)
+
+		return "", false
+	}
+	o.knownKeys[key] = true
+
+	return sec, true
+}
+
+func (o *osKeyring) Set(ctx context.Context, name, value string) {
+	if err := keyring.Set("gopass", name, value); err != nil {
+		debug.Log("failed to set %s: %v", name, err)
+		out.Warningf(ctx, "Failed to cache passphrase in OS keyring: %s", err)
+
+		return
+	}
+	o.knownKeys[name] = true
+}
+
+func (o *osKeyring) Remove(name string) {
+	if err := keyring.Delete("gopass", name); err != nil {
+		debug.Log("failed to remove %s from keyring: %s", name, err)
+
+		return
+	}
+	o.knownKeys[name] = false
+}
+
+func (o *osKeyring) Purge() {
+	// purge all known keys. only useful for the REPL case.
+	// Does not persist across restarts.
+	for k, v := range o.knownKeys {
+		if !v {
+			continue
+		}
+		if err := keyring.Delete("gopass", k); err != nil {
+			debug.Log("failed to remove %s from keyring: %s", k, err)
+		}
+	}
+}
+
+type askPass struct {
+	testing bool
+	cache   cacher
+}
+
+var keyringWarningOnce sync.Once
+
+func newAskPass(ctx context.Context) *askPass {
+	a := &askPass{
+		cache: cache.NewInMemTTL[string, string](time.Hour, 24*time.Hour),
+	}
+
+	if config.Bool(ctx, "age.usekeychain") {
+		if err := keyring.Set("gopass", "sentinel", "empty"); err == nil {
+			debug.V(1).Log("using OS keychain to cache age credentials")
+			a.cache = newOsKeyring()
+		} else {
+			keyringWarningOnce.Do(func() {
+				out.Warningf(ctx, "OS keyring is not available. Passphrase caching will not persist. Disable age.usekeychain or install a keyring provider (e.g. gnome-keyring): %s", err)
+			})
+		}
+	}
+
+	return a
 }
 
 func (a *askPass) Ping(_ context.Context) error {
 	return nil
 }
 
-func (a *askPass) Passphrase(key string, reason string, repeat bool) (string, error) {
+func (a *askPass) Passphrase(ctx context.Context, key string, reason string, repeat bool) (string, error) {
 	if value, found := a.cache.Get(key); found || a.testing {
-		debug.Log("Read value for %s from cache", key)
+		debug.V(1).Log("Read value for %s from cache", key)
+
 		return value, nil
 	}
-	debug.Log("Value for %s not found in cache", key)
+	debug.V(1).Log("Value for %s not found in cache", key)
 
-	// TODO we shouldn't print here like this ...
-	out.Printf(context.TODO(), "🔑 Please enter your passphrase to unlock the age keyring")
-	pi, err := a.pinentry()
+	pw, err := a.getPassphrase(reason, repeat)
 	if err != nil {
-		return "", fmt.Errorf("pinentry (%s) error: %w", pinentry.GetBinary(), err)
+		return "", fmt.Errorf("pinentry error: %w", err)
 	}
-	defer pi.Close()
 
-	_ = pi.Set("title", "gopass")
-	_ = pi.Set("desc", "Need your passphrase "+reason)
-	_ = pi.Set("prompt", "Please enter your passphrase:")
-	_ = pi.Set("ok", "OK")
+	debug.V(1).Log("Updated value for %s in cache", key)
+	a.cache.Set(ctx, key, pw)
+
+	return pw, nil
+}
+
+func (a *askPass) getPassphrase(reason string, repeat bool) (string, error) {
+	if os.Getenv("GOPASS_AGE_STDIN_PASSPHRASE") != "" {
+		debug.Log("GOPASS_AGE_STDIN_PASSPHRASE is set, using CLI fallback")
+		pf := cli.New()
+		if repeat {
+			_ = pf.Set("REPEAT")
+		}
+
+		ctx := ctxutil.WithTerminal(context.Background(), false)
+		pw, err := termio.AskForPassword(ctx, reason, repeat)
+		if err != nil {
+			return "", fmt.Errorf("failed to ask for passphrase: %w", err)
+		}
+
+		return pw, nil
+	}
+
+	opts := []pinentry.ClientOption{
+		pinentry.WithBinaryNameFromGnuPGAgentConf(),
+		pinentry.WithDesc(strings.TrimSuffix(reason, ":") + "."),
+		pinentry.WithGPGTTY(),
+		pinentry.WithPrompt("Passphrase:"),
+		pinentry.WithTitle("gopass"),
+	}
 	if repeat {
-		_ = pi.Set("REPEAT", "Confirm")
+		opts = append(opts, pinentry.WithRepeat("Confirm"))
+	} else {
+		opts = append(
+			opts,
+			pinentry.WithOption(pinentry.OptionAllowExternalPasswordCache),
+			pinentry.WithKeyInfo("gopass/age-identities"),
+		)
 	}
 
-	pw, err := pi.GetPin()
+	p, err := pinentry.NewClient(opts...)
 	if err != nil {
-		return "", fmt.Errorf("pinentry (%s) error: %w", pinentry.GetBinary(), err)
+		debug.Log("Pinentry not found: %q", err)
+		// use CLI fallback
+		pf := cli.New()
+		if repeat {
+			_ = pf.Set("REPEAT")
+		}
+
+		return pf.GetPIN()
+	}
+	defer func() {
+		_ = p.Close()
+	}()
+
+	result, err := p.GetPIN()
+	if err != nil {
+		return "", fmt.Errorf("pinentry error: %w", err)
 	}
 
-	pass := string(pw)
-	debug.Log("Updated value for %s in cache", key)
-	a.cache.Set(key, pass)
-	return pass, nil
+	return result.PIN, nil
 }
 
 func (a *askPass) Remove(key string) {
 	a.cache.Remove(key)
 }
 
-// Lock flushes the password cache
-func (a *Age) Lock() {
-	a.askPass.cache.Purge()
-	a.krCache = nil
+func (a *askPass) Lock() {
+	a.cache.Purge()
 }

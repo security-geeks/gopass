@@ -12,6 +12,8 @@ digraph G {
   gitfs [label="internal/backend/storage/gitfs"];
   gitfs -> gitcli;
   gitcli [label="git binary",shape=Mdiamond];
+  leaf -> gogit [style="dotted"];
+  gogit [label="internal/backend/storage/gogit"];
   leaf -> gpg;
   gpg [label="internal/backend/crypto/gpg/cli"];
   leaf -> age [style="dotted"];
@@ -33,6 +35,7 @@ digraph G {
   hibp -> api;
   hibp [label="gopass-hibp",shape=box];
   hibp -> pkghibp;
+  gopass -> pkghibp;
   pkghibp [label="pkg/hibp"];
   gitcreds -> api;
   gitcreds [label="git-credential-gopass",shape=box];

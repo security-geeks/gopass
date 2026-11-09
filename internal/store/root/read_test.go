@@ -1,21 +1,18 @@
 package root
 
 import (
-	"context"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/tests/gptest"
-
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGet(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithHidden(ctx, true)
 
@@ -23,5 +20,5 @@ func TestGet(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = rs.Get(ctx, "foo")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }

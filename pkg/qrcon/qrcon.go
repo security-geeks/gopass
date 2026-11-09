@@ -3,9 +3,9 @@
 package qrcon
 
 import (
-	"bytes"
 	"fmt"
 	"image/color"
+	"strings"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -15,37 +15,49 @@ const (
 	white = "\033[47m  \033[0m"
 )
 
-// QRCode returns a string containing an ANSI encoded
-// QR Code
+// ErrUnknowColor is returned when the color is unknown.
+var ErrUnknowColor = fmt.Errorf("unknown color")
+
+// QRCode returns a string containing an ANSI encoded QR Code.
+// This can be printed to a terminal that supports ANSI escape codes.
 func QRCode(content string) (string, error) {
 	q, err := qrcode.New(content, qrcode.Medium)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create qr code: %w", err)
 	}
-	buf := bytes.Buffer{}
+
+	var sb strings.Builder
+
 	i := q.Image(0)
 	b := i.Bounds()
+
 	for x := b.Min.X; x < b.Max.X; x++ {
 		for y := b.Min.Y; y < b.Max.Y; y++ {
 			col := i.At(x, y)
-			if sameColor(col, q.ForegroundColor) {
-				_, _ = buf.WriteString(black)
-			} else if sameColor(col, q.BackgroundColor) {
-				_, _ = buf.WriteString(white)
-			} else {
-				return "", fmt.Errorf("unexpected color at (%d,%d): %+v", x, y, col)
+
+			switch {
+			case sameColor(col, q.ForegroundColor):
+				_, _ = sb.WriteString(black)
+			case sameColor(col, q.BackgroundColor):
+				_, _ = sb.WriteString(white)
+			default:
+				return "", fmt.Errorf("error at (%d,%d): %+v: %w", x, y, col, ErrUnknowColor)
 			}
 		}
-		_, _ = buf.WriteString("\n")
+
+		_, _ = sb.WriteString("\n")
 	}
-	return buf.String(), nil
+
+	return sb.String(), nil
 }
 
 func sameColor(a color.Color, b color.Color) bool {
 	r1, g1, b1, a1 := a.RGBA()
 	r2, g2, b2, a2 := b.RGBA()
+
 	if r1 == r2 && g1 == g2 && b1 == b2 && a1 == a2 {
 		return true
 	}
+
 	return false
 }

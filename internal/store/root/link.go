@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// Link creates a symlink
+// Link creates a symlink.
 func (r *Store) Link(ctx context.Context, from, to string) error {
 	subFrom, fName := r.getStore(from)
 	subTo, tName := r.getStore(to)
@@ -15,4 +15,11 @@ func (r *Store) Link(ctx context.Context, from, to string) error {
 	}
 
 	return subFrom.Link(ctx, fName, tName)
+}
+
+// LinkTarget returns the target of a linked secret, if the named entry is a link.
+func (r *Store) LinkTarget(ctx context.Context, name string) (string, bool, error) {
+	sub, _ := r.getStore(name)
+
+	return sub.LinkTarget(ctx, name)
 }

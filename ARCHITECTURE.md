@@ -42,6 +42,35 @@ change in the API require a major version bump even if nothing about the tool
 apply semantic versioning only to the CLI tool, not the Go module. This is not
 ideal and might change with sufficient active contributors.
 
+## API Stability
+
+Semantic versioning applies to the **gopass CLI binary** only. The Go module
+(`github.com/gopasspw/gopass`) does not carry independent semver guarantees:
+a breaking change to `pkg/` interfaces may ship without a major-version bump.
+
+`pkg/gopass` is instead **best-effort stable**, as decided in
+[ADR A-12](docs/adr/A-12-pkg-api-stability.md) and restated in
+`pkg/gopass/doc.go`:
+
+- Additive changes (new exported symbols, new functional-option parameters)
+  may appear in any release.
+- Breaking changes (removing or changing the signature of an exported symbol,
+  changing an interface method set or error semantics) require a
+  `[PKG-BREAK]` entry in `CHANGELOG.md` and a deprecation window of two minor
+  releases or three months, whichever is longer.
+
+Consumers of `pkg/gopass` should review the `[PKG-BREAK]` entries in
+`CHANGELOG.md` before upgrading.
+
+A break confined to `pkg/gopass` does **not** trigger a major release of the
+CLI. See [docs/conventions.md](docs/conventions.md) section 2 for how the two
+compatibility surfaces are versioned, and section 1.4 for the commit-message
+markers that distinguish them.
+
+Formalising the contract further (via a `v2` module path or a published
+compatibility window) is deferred until the active contributor base grows
+sufficiently to maintain that commitment.
+
 ### `docs/backends`
 
 This folder contains documentation about each of our supported backends. See
@@ -96,7 +125,19 @@ This directory contains one file, and sometimes sub folders, for each command
 `gopass` supports. These are mostly self-contained, but some (e.g. show / edit
 / find) need to depend on each other.
 
-TODO: There is a lot to be said about this package, e.g. custom errors.
+All commands are registered on the central `Action` struct and wired up in
+`commands.go`. Each command file exposes one or more public methods that are
+passed as handler callbacks to the CLI framework.
+
+Error handling uses the `internal/action/exit` package which provides typed
+exit codes (e.g. `exit.Usage`, `exit.NotFound`, `exit.IO`). Custom errors
+returned from `exit.Error()` carry both a human-readable message and a numeric
+exit code so that callers and scripts can distinguish failure modes.
+
+The numeric values of all exit codes are **stable** — they are assigned as
+explicit integer constants and must never be renumbered. The full table, along
+with per-command breakdowns, is documented in [docs/exit-codes.md](docs/exit-codes.md).
+Run `gopass --exit-codes` to print the table at any time.
 
 ### `internal/backend`
 

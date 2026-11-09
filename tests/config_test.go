@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
+	"github.com/gopasspw/gopass/pkg/fsutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBaseConfig(t *testing.T) {
@@ -14,47 +14,53 @@ func TestBaseConfig(t *testing.T) {
 	defer ts.teardown()
 
 	out, err := ts.run("config")
-	assert.NoError(t, err)
-	wanted := `autoclip: false
-autoimport: true
-cliptimeout: 45
-exportkeys: false
-nocolor: false
-nopager: false
-notifications: false
-parsing: true
+	require.NoError(t, err)
+
+	wanted := `age.agent-enabled = false
+age.agent-timeout = 0
+core.autopush = true
+core.autosync = true
+core.casefold = false
+core.cliptimeout = 45
+core.exportkeys = false
+core.follow-references = false
+core.notifications = true
+gpg.timeout = 60
 `
-	wanted += "path: " + ts.storeDir("root") + "\n"
-	wanted += "safecontent: false"
+	wanted += "mounts.path = " + ts.storeDir("root") + "\n" +
+		`pwgen.xkcd-lang = en
+show.fuzzysearch = true
+show.password = false`
 
 	assert.Equal(t, wanted, out)
 
 	invertables := []string{
-		"autoimport",
-		"safecontent",
-		"parsing",
+		"core.autoimport",
+		"show.safecontent",
 	}
 
 	for _, invert := range invertables {
 		t.Run("invert "+invert, func(t *testing.T) {
-			out, err = ts.run("config " + invert + " false")
-			assert.NoError(t, err)
-			assert.Equal(t, invert+": false", out)
+			arg := "config " + invert + " false"
+			out, err = ts.run(arg)
+			require.NoError(t, err, "Running gopass "+arg)
+			assert.Equal(t, "false", out, "Output of gopass "+arg)
 
-			out, err = ts.run("config " + invert)
-			assert.NoError(t, err)
-			assert.Equal(t, invert+": false", out)
+			arg = "config " + invert
+			out, err = ts.run(arg)
+			require.NoError(t, err, "Running gopass "+arg)
+			assert.Equal(t, "false", out, "Output of gopass "+arg)
 		})
 	}
 
 	t.Run("cliptimeout", func(t *testing.T) {
-		out, err = ts.run("config cliptimeout 120")
-		assert.NoError(t, err)
-		assert.Equal(t, "cliptimeout: 120", out)
+		out, err = ts.run("config core.cliptimeout 120")
+		require.NoError(t, err)
+		assert.Equal(t, "120", out)
 
-		out, err = ts.run("config cliptimeout")
-		assert.NoError(t, err)
-		assert.Equal(t, "cliptimeout: 120", out)
+		out, err = ts.run("config core.cliptimeout")
+		require.NoError(t, err)
+		assert.Equal(t, "120", out)
 	})
 }
 
@@ -67,23 +73,27 @@ func TestMountConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = ts.run("config")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	wanted := `autoclip: false
-autoimport: true
-cliptimeout: 45
-exportkeys: false
-nocolor: false
-nopager: false
-notifications: false
-parsing: true
-path: `
-	wanted += ts.storeDir("root") + "\n"
-	wanted += `safecontent: false
-mount "mnt/m1" => "`
-	wanted += ts.storeDir("m1") + "\"\n"
+	wanted := `age.agent-enabled = false
+age.agent-timeout = 0
+core.autopush = true
+core.autosync = true
+core.casefold = false
+core.cliptimeout = 45
+core.exportkeys = false
+core.follow-references = false
+core.notifications = true
+gpg.timeout = 60
+`
+	wanted += "mounts.mnt/m1.path = " + fsutil.ShrinkPath(ts.storeDir("m1")) + "\n"
+	wanted += "mounts.path = " + ts.storeDir("root") + "\n"
+	wanted += "pwgen.xkcd-lang = en\n"
+	wanted += "recipients.mnt/m1.hash = 9a4c4b1e0eb9ade2e692ff948f43d9668145eca3df88ffff67e0e21426252907\n"
+	wanted += "show.fuzzysearch = true\n"
+	wanted += "show.password = false\n"
 
 	out, err := ts.run("config")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, strings.TrimSpace(wanted), out)
 }

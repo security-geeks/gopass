@@ -1,26 +1,29 @@
-// +build !windows
+//go:build !windows
 
 package clipboard
 
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"syscall"
 
-	"github.com/gopasspw/gopass/pkg/ctxutil"
+	"github.com/gopasspw/gopass/internal/config"
+	"github.com/gopasspw/gopass/internal/pwschemes/argon2id"
 )
 
-// clear will spwan a copy of gopass that waits in a detached background
+// clearClip will spawn a copy of gopass that waits in a detached background
 // process group until the timeout is expired. It will then compare the contents
 // of the clipboard and erase it if it still contains the data gopass copied
 // to it.
-func clear(ctx context.Context, content []byte, timeout int) error {
-	hash := fmt.Sprintf("%x", sha256.Sum256(content))
+func clearClip(ctx context.Context, name string, content []byte, timeout int) error {
+	hash, err := argon2id.Generate(string(content), 0)
+	if err != nil {
+		return fmt.Errorf("failed to generate checksum: %w", err)
+	}
 
 	// kill any pending unclip processes
 	_ = killPrecedessors()
@@ -30,11 +33,19 @@ func clear(ctx context.Context, content []byte, timeout int) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
-	cmd.Env = append(os.Environ(), "GOPASS_UNCLIP_CHECKSUM="+hash)
-	if !ctxutil.IsNotifications(ctx) {
+
+	cmd.Env = append(os.Environ(), "GOPASS_UNCLIP_NAME="+name)
+	cmd.Env = append(cmd.Env, "GOPASS_UNCLIP_CHECKSUM="+hash)
+
+	if !config.Bool(ctx, "core.notifications") {
 		cmd.Env = append(cmd.Env, "GOPASS_NO_NOTIFY=true")
 	}
-	return cmd.Start()
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to invoke unclip: %w", err)
+	}
+
+	return nil
 }
 
 func walkFn(pid int, killFn func(int)) {

@@ -4,27 +4,47 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/gopasspw/gopass/internal/config"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEncrypt(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(config.NewContextInMemory())
 
 	g := &GPG{}
 	g.binary = "rundll32"
 
 	_, err := g.Encrypt(ctx, []byte("foo"), nil)
-	assert.NoError(t, err)
+
+	// No recipients are configured so it will fail
+	require.Error(t, err)
 	cancel()
 }
 
 func TestDecrypt(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(config.NewContextInMemory())
 
 	g := &GPG{}
 	g.binary = "rundll32"
 
 	_, err := g.Decrypt(ctx, []byte("foo"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	cancel()
+}
+
+func TestGenerateIdentity(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(config.NewContextInMemory())
+
+	g := &GPG{}
+	g.binary = "rundll32"
+
+	_, err := g.GenerateIdentity(ctx, "foo", "foo@bar.com", "bar")
+	require.NoError(t, err)
 	cancel()
 }

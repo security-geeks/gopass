@@ -18,13 +18,28 @@ $ gopass insert entry key
 
 Insert is similar in effect to `gopass edit` with the advantage of not displaying any content of the secret when changing a key.
 
+## Exit codes
+
+| Code | Meaning |
+|-----:|---------|
+| 0 | Secret inserted successfully |
+| 1 | Editor could not be launched for buffer-based insert |
+| 2 | YAML key could not be parsed |
+| 3 | Secret exists and user declined overwrite |
+| 9 | No secret name provided |
+| 11 | Existing secret could not be read for append or key-insert |
+| 12 | Secret could not be encrypted and saved |
+| 18 | I/O error reading from stdin or prompting for password |
+
+See [docs/exit-codes.md](../exit-codes.md) for the full table.
+
 Note: `insert` will not change anything but the `Password` field (using the `insert entry` invocation) or the specified key (using the `insert entry key` invocation).
 
 ## Flags
 
-Flag | Aliases | Description
----- | ------- | -----------
-`--echo` | `-e` | Display the secret while typing (default: `false`)
-`--multiline` | `-m` | Insert using `$EDITOR` (default: `false`). This identical to running `gopass edit entry`. All other flags are ignored.
-`--force` | `-f` | Overwrite any existing value and do not prompt. (default: `false`)
-`--append` | `-a` | Append to any existing data. Only applies if reading from STDIN. (default: `false`)
+| Flag          | Aliases | Description                                                                                                            |
+|---------------|---------|------------------------------------------------------------------------------------------------------------------------|
+| `--echo`      | `-e`    | Display the secret while typing (default: `false`)                                                                     |
+| `--multiline` | `-m`    | Insert using `$EDITOR` (default: `false`). This identical to running `gopass edit entry`. All other flags are ignored. |
+| `--force`     | `-f`    | Overwrite any existing value and do not prompt. (default: `false`)                                                     |
+| `--append`    | `-a`    | Append to any existing data. Only applies if reading from STDIN. (default: `false`)                                    |

@@ -1,30 +1,23 @@
 package leaf
 
 import (
-	"bytes"
-	"context"
-	"os"
 	"testing"
 
-	plain "github.com/gopasspw/gopass/internal/backend/crypto/plain"
+	"github.com/gopasspw/gopass/internal/backend/crypto/plain"
 	"github.com/gopasspw/gopass/internal/backend/storage/fs"
-	"github.com/gopasspw/gopass/internal/out"
-	"github.com/gopasspw/gopass/pkg/ctxutil"
+	"github.com/gopasspw/gopass/internal/config"
+	"github.com/gopasspw/gopass/internal/recipients"
 	"github.com/gopasspw/gopass/pkg/gopass/secrets"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCopy(t *testing.T) {
-	ctx := context.Background()
-	ctx = ctxutil.WithExportKeys(ctx, false)
+	t.Parallel()
 
-	obuf := &bytes.Buffer{}
-	out.Stdout = obuf
-	defer func() {
-		out.Stdout = os.Stdout
-	}()
+	ctx := config.NewContextInMemory()
+
+	ctx, stdout, _ := captureOutput(t, ctx)
 
 	for _, tc := range []struct {
 		name string
@@ -34,7 +27,8 @@ func TestCopy(t *testing.T) {
 			name: "Empty store",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					assert.Error(t, s.Copy(ctx, "foo", "bar"))
+					t.Helper()
+					require.Error(t, s.Copy(ctx, "foo", "bar"))
 				}
 			},
 		},
@@ -42,10 +36,11 @@ func TestCopy(t *testing.T) {
 			name: "Single entry",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					nsec := &secrets.Plain{}
+					t.Helper()
+					nsec := secrets.NewAKV()
 					nsec.SetPassword("bar")
-					assert.NoError(t, s.Set(ctx, "foo", nsec))
-					assert.NoError(t, s.Copy(ctx, "foo", "bar"))
+					require.NoError(t, s.Set(ctx, "foo", nsec))
+					require.NoError(t, s.Copy(ctx, "foo", "bar"))
 					sec, err := s.Get(ctx, "foo")
 					require.NoError(t, err)
 					assert.Equal(t, "bar", sec.Password())
@@ -59,47 +54,48 @@ func TestCopy(t *testing.T) {
 			name: "Recursive",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					sec := &secrets.Plain{}
+					t.Helper()
+					sec := secrets.NewAKV()
 					sec.SetPassword("baz")
-					assert.NoError(t, s.Set(ctx, "foo/bar/baz", sec))
+					require.NoError(t, s.Set(ctx, "foo/bar/baz", sec))
 					sec.SetPassword("zab")
-					assert.NoError(t, s.Set(ctx, "foo/bar/zab", sec))
-					assert.Error(t, s.Copy(ctx, "foo", "bar"))
+					require.NoError(t, s.Set(ctx, "foo/bar/zab", sec))
+					require.Error(t, s.Copy(ctx, "foo", "bar"))
 				}
 			},
 		},
 	} {
-		// common setup
-		tempdir, err := os.MkdirTemp("", "gopass-")
-		require.NoError(t, err)
+		t.Run(tc.name, func(t *testing.T) {
+			// common setup
+			tempdir := t.TempDir()
 
-		s := &Store{
-			alias:   "",
-			path:    tempdir,
-			crypto:  plain.New(),
-			storage: fs.New(tempdir),
-		}
+			defer func() {
+				seekStart(t, stdout)
+			}()
 
-		assert.NoError(t, s.saveRecipients(ctx, []string{"john.doe"}, "test"))
+			s := &Store{
+				alias:   "",
+				path:    tempdir,
+				crypto:  plain.New(),
+				storage: fs.New(tempdir),
+			}
 
-		// run test case
-		t.Run(tc.name, tc.tf(s))
+			rs := recipients.New()
+			rs.Add("john.doe")
+			require.NoError(t, s.saveRecipients(ctx, rs, "test"))
 
-		obuf.Reset()
-		// common tear down
-		_ = os.RemoveAll(tempdir)
+			// run test case
+			t.Run(tc.name, tc.tf(s))
+		})
 	}
 }
 
 func TestMove(t *testing.T) {
-	ctx := context.Background()
-	ctx = ctxutil.WithExportKeys(ctx, false)
+	t.Parallel()
 
-	obuf := &bytes.Buffer{}
-	out.Stdout = obuf
-	defer func() {
-		out.Stdout = os.Stdout
-	}()
+	ctx := config.NewContextInMemory()
+
+	ctx, stdout, _ := captureOutput(t, ctx)
 
 	for _, tc := range []struct {
 		name string
@@ -109,7 +105,8 @@ func TestMove(t *testing.T) {
 			name: "Empty store",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					assert.Error(t, s.Move(ctx, "foo", "bar"))
+					t.Helper()
+					require.Error(t, s.Move(ctx, "foo", "bar"))
 				}
 			},
 		},
@@ -117,12 +114,13 @@ func TestMove(t *testing.T) {
 			name: "Single entry",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					nsec := &secrets.Plain{}
+					t.Helper()
+					nsec := secrets.NewAKV()
 					nsec.SetPassword("bar")
-					assert.NoError(t, s.Set(ctx, "foo", nsec))
-					assert.NoError(t, s.Move(ctx, "foo", "bar"))
+					require.NoError(t, s.Set(ctx, "foo", nsec))
+					require.NoError(t, s.Move(ctx, "foo", "bar"))
 					_, err := s.Get(ctx, "foo")
-					assert.Error(t, err)
+					require.Error(t, err)
 
 					sec, err := s.Get(ctx, "bar")
 					require.NoError(t, err)
@@ -134,48 +132,49 @@ func TestMove(t *testing.T) {
 			name: "Recursive",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					sec := &secrets.Plain{}
+					t.Helper()
+					sec := secrets.NewAKV()
 					sec.SetPassword("baz")
-					assert.NoError(t, s.Set(ctx, "foo/bar/baz", sec))
+					require.NoError(t, s.Set(ctx, "foo/bar/baz", sec))
 					sec.SetPassword("zab")
-					assert.NoError(t, s.Set(ctx, "foo/bar/zab", sec))
-					assert.Error(t, s.Move(ctx, "foo", "bar"))
+					require.NoError(t, s.Set(ctx, "foo/bar/zab", sec))
+					require.Error(t, s.Move(ctx, "foo", "bar"))
 				}
 			},
 		},
 	} {
-		// common setup
-		tempdir, err := os.MkdirTemp("", "gopass-")
-		require.NoError(t, err)
+		t.Run(tc.name, func(t *testing.T) {
+			// common setup
+			tempdir := t.TempDir()
 
-		s := &Store{
-			alias:   "",
-			path:    tempdir,
-			crypto:  plain.New(),
-			storage: fs.New(tempdir),
-		}
+			defer func() {
+				seekStart(t, stdout)
+			}()
 
-		err = s.saveRecipients(ctx, []string{"john.doe"}, "test")
-		require.NoError(t, err)
+			s := &Store{
+				alias:   "",
+				path:    tempdir,
+				crypto:  plain.New(),
+				storage: fs.New(tempdir),
+			}
 
-		// run test case
-		t.Run(tc.name, tc.tf(s))
+			rs := recipients.New()
+			rs.Add("john.doe")
 
-		obuf.Reset()
-		// common tear down
-		_ = os.RemoveAll(tempdir)
+			require.NoError(t, s.saveRecipients(ctx, rs, "test"))
+
+			// run test case
+			t.Run(tc.name, tc.tf(s))
+		})
 	}
 }
 
 func TestDelete(t *testing.T) {
-	ctx := context.Background()
-	ctx = ctxutil.WithExportKeys(ctx, false)
+	t.Parallel()
 
-	obuf := &bytes.Buffer{}
-	out.Stdout = obuf
-	defer func() {
-		out.Stdout = os.Stdout
-	}()
+	ctx := config.NewContextInMemory()
+
+	ctx, stdout, _ := captureOutput(t, ctx)
 
 	for _, tc := range []struct {
 		name string
@@ -185,7 +184,8 @@ func TestDelete(t *testing.T) {
 			name: "Empty store",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					assert.Error(t, s.Delete(ctx, "foo"))
+					t.Helper()
+					require.Error(t, s.Delete(ctx, "foo"))
 				}
 			},
 		},
@@ -193,48 +193,50 @@ func TestDelete(t *testing.T) {
 			name: "Single entry",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					sec := &secrets.Plain{}
+					t.Helper()
+					sec := secrets.NewAKV()
 					sec.SetPassword("bar")
-					assert.NoError(t, s.Set(ctx, "foo", sec))
-					assert.NoError(t, s.Delete(ctx, "foo"))
+					require.NoError(t, s.Set(ctx, "foo", sec))
+					require.NoError(t, s.Delete(ctx, "foo"))
 					_, err := s.Get(ctx, "foo")
-					assert.Error(t, err)
+					require.Error(t, err)
 				}
 			},
 		},
 	} {
-		// common setup
-		tempdir, err := os.MkdirTemp("", "gopass-")
-		require.NoError(t, err)
+		t.Run(tc.name, func(t *testing.T) {
+			// common setup
+			tempdir := t.TempDir()
 
-		s := &Store{
-			alias:   "",
-			path:    tempdir,
-			crypto:  plain.New(),
-			storage: fs.New(tempdir),
-		}
+			defer func() {
+				seekStart(t, stdout)
+			}()
 
-		err = s.saveRecipients(ctx, []string{"john.doe"}, "test")
-		require.NoError(t, err)
+			s := &Store{
+				alias:   "",
+				path:    tempdir,
+				crypto:  plain.New(),
+				storage: fs.New(tempdir),
+			}
 
-		// run test case
-		t.Run(tc.name, tc.tf(s))
+			rs := recipients.New()
+			rs.Add("john.doe")
 
-		obuf.Reset()
-		// common tear down
-		_ = os.RemoveAll(tempdir)
+			require.NoError(t, s.saveRecipients(ctx, rs, "test"))
+
+			// run test case
+			t.Run(tc.name, tc.tf(s))
+		})
 	}
 }
 
 func TestPrune(t *testing.T) {
-	ctx := context.Background()
-	ctx = ctxutil.WithExportKeys(ctx, false)
+	t.Parallel()
 
-	obuf := &bytes.Buffer{}
-	out.Stdout = obuf
-	defer func() {
-		out.Stdout = os.Stdout
-	}()
+	ctx := config.NewContextInMemory()
+	ctx = config.NewInMemory().WithConfig(ctx)
+
+	ctx, stdout, _ := captureOutput(t, ctx)
 
 	for _, tc := range []struct {
 		name string
@@ -244,7 +246,8 @@ func TestPrune(t *testing.T) {
 			name: "Empty store",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					assert.Error(t, s.Prune(ctx, "foo"))
+					t.Helper()
+					require.Error(t, s.Prune(ctx, "foo"))
 				}
 			},
 		},
@@ -252,13 +255,14 @@ func TestPrune(t *testing.T) {
 			name: "Single entry",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					sec := &secrets.Plain{}
+					t.Helper()
+					sec := secrets.NewAKV()
 					sec.SetPassword("bar")
-					assert.NoError(t, s.Set(ctx, "foo", sec))
-					assert.NoError(t, s.Prune(ctx, "foo"))
+					require.NoError(t, s.Set(ctx, "foo", sec))
+					require.NoError(t, s.Prune(ctx, "foo"))
 
 					_, err := s.Get(ctx, "foo")
-					assert.Error(t, err)
+					require.Error(t, err)
 				}
 			},
 		},
@@ -266,43 +270,47 @@ func TestPrune(t *testing.T) {
 			name: "Multi entry nested",
 			tf: func(s *Store) func(t *testing.T) {
 				return func(t *testing.T) {
-					sec := &secrets.Plain{}
+					t.Helper()
+					sec := secrets.NewAKV()
 					sec.SetPassword("bar")
-					assert.NoError(t, s.Set(ctx, "foo/bar/baz", sec))
-					assert.NoError(t, s.Set(ctx, "foo/bar/zab", sec))
-					assert.NoError(t, s.Prune(ctx, "foo/bar"))
+					require.NoError(t, s.Set(ctx, "foo/bar/baz", sec))
+					require.NoError(t, s.Set(ctx, "foo/bar/zab", sec))
+					require.NoError(t, s.Prune(ctx, "foo/bar"))
 
 					_, err := s.Get(ctx, "foo/bar/baz")
-					assert.Error(t, err)
+					require.Error(t, err)
 
 					_, err = s.Get(ctx, "foo/bar/zab")
-					assert.Error(t, err)
+					require.Error(t, err)
 
 					// delete empty folder
-					assert.Error(t, s.Prune(ctx, "foo/"), "delete non-existing entry")
+					require.Error(t, s.Prune(ctx, "foo/"), "delete non-existing entry")
 				}
 			},
 		},
 	} {
-		// common setup
-		tempdir, err := os.MkdirTemp("", "gopass-")
-		require.NoError(t, err)
+		t.Run(tc.name, func(t *testing.T) {
+			// common setup
+			tempdir := t.TempDir()
 
-		s := &Store{
-			alias:   "",
-			path:    tempdir,
-			crypto:  plain.New(),
-			storage: fs.New(tempdir),
-		}
+			defer func() {
+				seekStart(t, stdout)
+			}()
 
-		err = s.saveRecipients(ctx, []string{"john.doe"}, "test")
-		assert.NoError(t, err)
+			s := &Store{
+				alias:   "",
+				path:    tempdir,
+				crypto:  plain.New(),
+				storage: fs.New(tempdir),
+			}
 
-		// run test case
-		t.Run(tc.name, tc.tf(s))
+			rs := recipients.New()
+			rs.Add("john.doe")
 
-		obuf.Reset()
-		// common tear down
-		_ = os.RemoveAll(tempdir)
+			require.NoError(t, s.saveRecipients(ctx, rs, "test"))
+
+			// run test case
+			t.Run(tc.name, tc.tf(s))
+		})
 	}
 }

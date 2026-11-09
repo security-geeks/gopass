@@ -1,16 +1,23 @@
-// +build !windows
+//go:build !windows
 
 package appdir
 
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/gopasspw/gopass/pkg/debug"
 )
 
-// UserConfig returns the users config dir
-func UserConfig() string {
+// UserConfig returns the user's config directory.
+// It follows the XDG Base Directory Specification.
+// The GOPASS_HOMEDIR environment variable can be used to override the base path.
+// See: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+func (a *Appdir) UserConfig() string {
 	if hd := os.Getenv("GOPASS_HOMEDIR"); hd != "" {
-		return filepath.Join(hd, ".config", "gopass")
+		debug.V(3).Log("GOPASS_HOMEDIR is set to %s", hd)
+
+		return filepath.Join(hd, ".config", a.name)
 	}
 
 	base := os.Getenv("XDG_CONFIG_HOME")
@@ -18,13 +25,16 @@ func UserConfig() string {
 		base = filepath.Join(os.Getenv("HOME"), ".config")
 	}
 
-	return filepath.Join(base, "gopass")
+	return filepath.Join(base, a.name)
 }
 
-// UserCache returns the users cache dir
-func UserCache() string {
+// UserCache returns the user's cache directory.
+// It follows the XDG Base Directory Specification.
+// The GOPASS_HOMEDIR environment variable can be used to override the base path.
+// See: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+func (a *Appdir) UserCache() string {
 	if hd := os.Getenv("GOPASS_HOMEDIR"); hd != "" {
-		return filepath.Join(hd, ".cache", "gopass")
+		return filepath.Join(hd, ".cache", a.name)
 	}
 
 	base := os.Getenv("XDG_CACHE_HOME")
@@ -32,13 +42,16 @@ func UserCache() string {
 		base = filepath.Join(os.Getenv("HOME"), ".cache")
 	}
 
-	return filepath.Join(base, "gopass")
+	return filepath.Join(base, a.name)
 }
 
-// UserData returns the users data dir
-func UserData() string {
+// UserData returns the user's data directory.
+// It follows the XDG Base Directory Specification.
+// The GOPASS_HOMEDIR environment variable can be used to override the base path.
+// See: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+func (a *Appdir) UserData() string {
 	if hd := os.Getenv("GOPASS_HOMEDIR"); hd != "" {
-		return filepath.Join(hd, ".local", "share", "gopass")
+		return filepath.Join(hd, ".local", "share", a.name)
 	}
 
 	base := os.Getenv("XDG_DATA_HOME")
@@ -46,5 +59,5 @@ func UserData() string {
 		base = filepath.Join(os.Getenv("HOME"), ".local", "share")
 	}
 
-	return filepath.Join(base, "gopass")
+	return filepath.Join(base, a.name)
 }

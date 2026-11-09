@@ -2,155 +2,131 @@ package ctxutil
 
 import (
 	"context"
-	"flag"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/stretchr/testify/assert"
-	"github.com/urfave/cli/v2"
+	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
-func TestColor(t *testing.T) {
-	ctx := context.Background()
-
-	assert.Equal(t, true, IsColor(ctx))
-	assert.Equal(t, true, IsColor(WithColor(ctx, true)))
-	assert.Equal(t, false, IsColor(WithColor(ctx, false)))
-}
-
 func TestTerminal(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, true, IsTerminal(ctx))
-	assert.Equal(t, true, IsTerminal(WithTerminal(ctx, true)))
-	assert.Equal(t, false, IsTerminal(WithTerminal(ctx, false)))
+	ctx := config.NewContextInMemory()
+
+	assert.True(t, IsTerminal(ctx))
+	assert.True(t, IsTerminal(WithTerminal(ctx, true)))
+	assert.False(t, IsTerminal(WithTerminal(ctx, false)))
 }
 
 func TestInteractive(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, true, IsInteractive(ctx))
-	assert.Equal(t, true, IsInteractive(WithInteractive(ctx, true)))
-	assert.Equal(t, false, IsInteractive(WithInteractive(ctx, false)))
+	ctx := config.NewContextInMemory()
+
+	assert.True(t, IsInteractive(ctx))
+	assert.True(t, IsInteractive(WithInteractive(ctx, true)))
+	assert.False(t, IsInteractive(WithInteractive(ctx, false)))
 }
 
 func TestStdin(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, false, IsStdin(ctx))
-	assert.Equal(t, true, IsStdin(WithStdin(ctx, true)))
-	assert.Equal(t, false, IsStdin(WithStdin(ctx, false)))
-}
+	ctx := config.NewContextInMemory()
 
-func TestNoPager(t *testing.T) {
-	ctx := context.Background()
-
-	assert.Equal(t, false, IsNoPager(ctx))
-	assert.Equal(t, true, IsNoPager(WithNoPager(ctx, true)))
-	assert.Equal(t, false, IsNoPager(WithNoPager(ctx, false)))
-}
-
-func TestShowSafeContent(t *testing.T) {
-	ctx := context.Background()
-
-	assert.Equal(t, false, IsShowSafeContent(ctx))
-	assert.Equal(t, true, IsShowSafeContent(WithShowSafeContent(ctx, true)))
-	assert.Equal(t, false, IsShowSafeContent(WithShowSafeContent(ctx, false)))
+	assert.False(t, IsStdin(ctx))
+	assert.True(t, IsStdin(WithStdin(ctx, true)))
+	assert.False(t, IsStdin(WithStdin(ctx, false)))
 }
 
 func TestGitCommit(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, true, IsGitCommit(ctx))
-	assert.Equal(t, true, IsGitCommit(WithGitCommit(ctx, true)))
-	assert.Equal(t, false, IsGitCommit(WithGitCommit(ctx, false)))
+	ctx := config.NewContextInMemory()
+
+	assert.True(t, IsGitCommit(ctx))
+	assert.True(t, IsGitCommit(WithGitCommit(ctx, true)))
+	assert.False(t, IsGitCommit(WithGitCommit(ctx, false)))
 }
 
 func TestAlwaysYes(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, false, IsAlwaysYes(ctx))
-	assert.Equal(t, true, IsAlwaysYes(WithAlwaysYes(ctx, true)))
-	assert.Equal(t, false, IsAlwaysYes(WithAlwaysYes(ctx, false)))
-}
+	ctx := config.NewContextInMemory()
 
-func TestNoColor(t *testing.T) {
-	ctx := context.Background()
-
-	assert.Equal(t, false, IsNoColor(ctx))
-	assert.Equal(t, true, IsNoColor(WithNoColor(ctx, true)))
-	assert.Equal(t, false, IsNoColor(WithNoColor(ctx, false)))
-}
-
-func TestVerbose(t *testing.T) {
-	ctx := context.Background()
-
-	assert.Equal(t, false, IsVerbose(ctx))
-	assert.Equal(t, true, IsVerbose(WithVerbose(ctx, true)))
-	assert.Equal(t, false, IsVerbose(WithVerbose(ctx, false)))
-}
-
-func TestNotifications(t *testing.T) {
-	ctx := context.Background()
-
-	assert.Equal(t, true, IsNotifications(ctx))
-	assert.Equal(t, true, IsNotifications(WithNotifications(ctx, true)))
-	assert.Equal(t, false, IsNotifications(WithNotifications(ctx, false)))
-}
-
-func TestProgressCallback(t *testing.T) {
-	ctx := context.Background()
-
-	var foo bool
-	pc := func() { foo = true }
-	GetProgressCallback(WithProgressCallback(ctx, pc))()
-	assert.Equal(t, true, foo)
+	assert.False(t, IsAlwaysYes(ctx))
+	assert.True(t, IsAlwaysYes(WithAlwaysYes(ctx, true)))
+	assert.False(t, IsAlwaysYes(WithAlwaysYes(ctx, false)))
 }
 
 func TestAlias(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, "", GetAlias(ctx))
-	assert.Equal(t, "", GetAlias(WithAlias(ctx, "")))
+	ctx := config.NewContextInMemory()
+
+	assert.Empty(t, GetAlias(ctx))
+	assert.Empty(t, GetAlias(WithAlias(ctx, "")))
 }
 
 func TestGitInit(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, true, IsGitInit(ctx))
-	assert.Equal(t, true, IsGitInit(WithGitInit(ctx, true)))
-	assert.Equal(t, false, IsGitInit(WithGitInit(ctx, false)))
+	ctx := config.NewContextInMemory()
+
+	assert.True(t, IsGitInit(ctx))
+	assert.True(t, IsGitInit(WithGitInit(ctx, true)))
+	assert.False(t, IsGitInit(WithGitInit(ctx, false)))
 }
 
 func TestForce(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, false, IsForce(ctx))
-	assert.Equal(t, true, IsForce(WithForce(ctx, true)))
-	assert.Equal(t, false, IsForce(WithForce(ctx, false)))
+	ctx := config.NewContextInMemory()
+
+	assert.False(t, IsForce(ctx))
+	assert.True(t, IsForce(WithForce(ctx, true)))
+	assert.False(t, IsForce(WithForce(ctx, false)))
 }
 
 func TestCommitMessage(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, "", GetCommitMessage(ctx))
+	ctx := config.NewContextInMemory()
+
+	assert.Empty(t, GetCommitMessage(ctx))
 	assert.Equal(t, "foo", GetCommitMessage(WithCommitMessage(ctx, "foo")))
-	assert.Equal(t, "", GetCommitMessage(WithCommitMessage(ctx, "")))
+	assert.Empty(t, GetCommitMessage(WithCommitMessage(ctx, "")))
+}
+
+func TestCommitMessageBody(t *testing.T) {
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
+
+	ctx2 := AddToCommitMessageBody(AddToCommitMessageBody(WithCommitMessage(ctx, "foo"), "bar"), "baz")
+	assert.Equal(t, "foo\n\nbar\nbaz", GetCommitMessageFull(ctx2))
+	assert.Equal(t, "foo", GetCommitMessage(ctx2))
+	assert.Equal(t, "bar\nbaz", GetCommitMessageBody(ctx2))
+	ctx2 = AddToCommitMessageBody(AddToCommitMessageBody(ctx, "bar"), "baz")
+	assert.Empty(t, GetCommitMessage(ctx2))
+	assert.Equal(t, "bar\nbaz", GetCommitMessageFull(ctx2))
+	assert.Equal(t, "bar\nbaz", GetCommitMessageBody(ctx2))
+	ctx2 = WithCommitMessage(ctx, "foo")
+	assert.Equal(t, "foo", GetCommitMessage(ctx2))
+	assert.Equal(t, "foo", GetCommitMessageFull(ctx2))
+	assert.Empty(t, GetCommitMessageBody(ctx2))
 }
 
 func TestComposite(t *testing.T) {
-	ctx := context.Background()
-	ctx = WithColor(ctx, false)
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
 	ctx = WithTerminal(ctx, false)
 	ctx = WithInteractive(ctx, false)
 	ctx = WithStdin(ctx, true)
-	ctx = WithNoPager(ctx, true)
-	ctx = WithShowSafeContent(ctx, true)
 	ctx = WithGitCommit(ctx, false)
 	ctx = WithAlwaysYes(ctx, true)
-	ctx = WithNoColor(ctx, true)
-	ctx = WithVerbose(ctx, true)
-	ctx = WithNotifications(ctx, true)
-	ctx = WithExportKeys(ctx, false)
 	ctx = WithEmail(ctx, "foo@bar.com")
 	ctx = WithUsername(ctx, "foo")
 	ctx = WithNoNetwork(ctx, true)
@@ -158,90 +134,120 @@ func TestComposite(t *testing.T) {
 	ctx = WithForce(ctx, true)
 	ctx = WithGitInit(ctx, false)
 
-	assert.Equal(t, false, IsColor(ctx))
-	assert.Equal(t, true, HasColor(ctx))
+	assert.False(t, IsTerminal(ctx))
+	assert.True(t, HasTerminal(ctx))
 
-	assert.Equal(t, false, IsTerminal(ctx))
-	assert.Equal(t, true, HasTerminal(ctx))
+	assert.False(t, IsInteractive(ctx))
+	assert.True(t, HasInteractive(ctx))
 
-	assert.Equal(t, false, IsInteractive(ctx))
-	assert.Equal(t, true, HasInteractive(ctx))
+	assert.True(t, IsStdin(ctx))
+	assert.True(t, HasStdin(ctx))
 
-	assert.Equal(t, true, IsStdin(ctx))
-	assert.Equal(t, true, HasStdin(ctx))
+	assert.False(t, IsGitCommit(ctx))
+	assert.True(t, HasGitCommit(ctx))
 
-	assert.Equal(t, true, IsNoPager(ctx))
-	assert.Equal(t, true, HasNoPager(ctx))
-
-	assert.Equal(t, true, IsShowSafeContent(ctx))
-	assert.Equal(t, true, HasShowSafeContent(ctx))
-
-	assert.Equal(t, false, IsGitCommit(ctx))
-	assert.Equal(t, true, HasGitCommit(ctx))
-
-	assert.Equal(t, true, IsAlwaysYes(ctx))
-	assert.Equal(t, true, HasAlwaysYes(ctx))
-
-	assert.Equal(t, true, IsNoColor(ctx))
-	assert.Equal(t, true, HasNoColor(ctx))
-
-	assert.Equal(t, true, IsVerbose(ctx))
-	assert.Equal(t, true, HasVerbose(ctx))
-
-	assert.Equal(t, true, IsNotifications(ctx))
-	assert.Equal(t, true, HasNotifications(ctx))
-
-	assert.Equal(t, false, IsExportKeys(ctx))
-	assert.Equal(t, true, HasExportKeys(ctx))
+	assert.True(t, IsAlwaysYes(ctx))
+	assert.True(t, HasAlwaysYes(ctx))
 
 	assert.Equal(t, "foo@bar.com", GetEmail(ctx))
 	assert.Equal(t, "foo", GetUsername(ctx))
 
-	assert.Equal(t, true, IsNoNetwork(ctx))
-	assert.Equal(t, true, HasNoNetwork(ctx))
+	assert.True(t, IsNoNetwork(ctx))
+	assert.True(t, HasNoNetwork(ctx))
 
 	assert.Equal(t, "foobar", GetCommitMessage(ctx))
-	assert.Equal(t, true, HasCommitMessage(ctx))
+	assert.True(t, HasCommitMessage(ctx))
 
-	assert.Equal(t, true, IsForce(ctx))
-	assert.Equal(t, true, HasForce(ctx))
+	assert.True(t, IsForce(ctx))
+	assert.True(t, HasForce(ctx))
 
-	assert.Equal(t, false, IsGitInit(ctx))
-	assert.Equal(t, true, HasGitInit(ctx))
+	assert.False(t, IsGitInit(ctx))
+	assert.True(t, HasGitInit(ctx))
 }
 
 func TestGlobalFlags(t *testing.T) {
-	ctx := context.Background()
-	app := cli.NewApp()
+	t.Parallel()
 
-	fs := flag.NewFlagSet("default", flag.ContinueOnError)
-	sf := cli.BoolFlag{
-		Name:  "yes",
-		Usage: "yes",
+	ctx := config.NewContextInMemory()
+
+	var captured context.Context
+
+	cmd := &cli.Command{
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "yes",
+				Usage: "yes",
+			},
+		},
+		Action: func(c context.Context, cmd *cli.Command) error {
+			captured = WithGlobalFlags(c, cmd)
+
+			return nil
+		},
 	}
-	assert.NoError(t, sf.Apply(fs))
-	assert.NoError(t, fs.Parse([]string{"--yes"}))
-	c := cli.NewContext(app, fs, nil)
-	c.Context = ctx
 
-	assert.Equal(t, true, IsAlwaysYes(WithGlobalFlags(c)))
-}
-
-func TestImportFunc(t *testing.T) {
-	ctx := context.Background()
-
-	ifunc := func(context.Context, string, []string) bool {
-		return true
-	}
-	assert.NotNil(t, GetImportFunc(ctx))
-	assert.Equal(t, true, GetImportFunc(WithImportFunc(ctx, ifunc))(ctx, "", nil))
-	assert.Equal(t, true, HasImportFunc(WithImportFunc(ctx, ifunc)))
-	assert.Equal(t, true, GetImportFunc(WithImportFunc(ctx, nil))(ctx, "", nil))
+	require.NoError(t, cmd.Run(ctx, []string{"test", "--yes"}))
+	assert.True(t, IsAlwaysYes(captured))
 }
 
 func TestHidden(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
 
 	assert.False(t, IsHidden(ctx))
 	assert.True(t, IsHidden(WithHidden(ctx, true)))
+}
+
+func TestSetupRemote(t *testing.T) {
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
+
+	assert.False(t, HasSetupRemote(ctx))
+	assert.True(t, HasSetupRemote(WithSetupRemote(ctx, "https://example.com/repo.git")))
+	assert.False(t, HasSetupRemote(WithSetupRemote(ctx, "")))
+}
+
+func TestPasswordCallback(t *testing.T) {
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
+
+	_, err := GetPasswordCallback(ctx)("prompt", false)
+	require.ErrorIs(t, err, ErrNoCallback)
+	assert.False(t, HasPasswordCallback(ctx))
+
+	ctx = WithPasswordCallback(ctx, func(prompt string, confirm bool) ([]byte, error) {
+		assert.Equal(t, "prompt", prompt)
+		assert.True(t, confirm)
+
+		return []byte("secret"), nil
+	})
+
+	pw, err := GetPasswordCallback(ctx)("prompt", true)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("secret"), pw)
+	assert.True(t, HasPasswordCallback(ctx))
+}
+
+func TestPasswordPurgeCallback(t *testing.T) {
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
+
+	assert.False(t, HasPasswordPurgeCallback(ctx))
+	assert.NotPanics(t, func() {
+		GetPasswordPurgeCallback(ctx)("prompt")
+	})
+
+	var purged bool
+	ctx = WithPasswordPurgeCallback(ctx, func(prompt string) {
+		assert.Equal(t, "prompt", prompt)
+		purged = true
+	})
+
+	GetPasswordPurgeCallback(ctx)("prompt")
+	assert.True(t, purged)
+	assert.True(t, HasPasswordPurgeCallback(ctx))
 }

@@ -1,126 +1,63 @@
 package pwrules
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"sort"
+	"context"
+	"slices"
+	"strings"
 
-	"github.com/gopasspw/gopass/pkg/appdir"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/pkg/debug"
-	"github.com/gopasspw/gopass/pkg/fsutil"
+	"github.com/gopasspw/gopass/pkg/set"
 )
 
-var (
-	customAliases = map[string][]string{}
-)
-
-// LookupAliases looks up known aliases for the given domain
-func LookupAliases(domain string) []string {
+// LookupAliases looks up known aliases for the given domain.
+// It will check for both built-in and custom aliases.
+func LookupAliases(ctx context.Context, domain string) []string {
+	customAliases := loadCustomAliases(ctx)
 	aliases := make([]string, 0, len(genAliases[domain])+len(customAliases[domain]))
 	aliases = append(aliases, genAliases[domain]...)
 	aliases = append(aliases, customAliases[domain]...)
-	sort.Strings(aliases)
+	slices.Sort(aliases)
+
 	return aliases
 }
 
-// AllAliases returns all aliases
-func AllAliases() map[string][]string {
+// AllAliases returns all aliases, including built-in and custom aliases.
+func AllAliases(ctx context.Context) map[string][]string {
+	customAliases := loadCustomAliases(ctx)
 	all := make(map[string][]string, len(genAliases)+len(customAliases))
 	for k, v := range genAliases {
 		all[k] = append(all[k], v...)
 	}
+
 	for k, v := range customAliases {
 		all[k] = append(all[k], v...)
 	}
+
 	return all
 }
 
-func init() {
-	if err := loadCustomAliases(); err != nil {
-		debug.Log("failed to load custom aliases: %s", err)
-	}
-}
+func loadCustomAliases(ctx context.Context) map[string][]string {
+	cfg, _ := config.FromContext(ctx)
+	customAliases := make(map[string][]string, 128)
+	for _, k := range set.SortedFiltered(cfg.Keys(""), func(k string) bool {
+		return strings.HasPrefix(k, "domain-alias.") && strings.HasSuffix(k, ".insteadof")
+	}) {
+		// NB: we currently only support system, env, global or local <root> store level aliases
+		for _, from := range cfg.GetAll(k) {
+			to := strings.TrimSuffix(strings.TrimPrefix(k, "domain-alias."), ".insteadof")
+			debug.Log("Loading alias: %q -> %q", from, to)
+			if e, found := customAliases[from]; found {
+				e = append(e, to)
+				slices.Sort(e)
+				customAliases[from] = e
 
-func filename() string {
-	return filepath.Join(appdir.UserConfig(), "domain-aliases.json")
-}
+				continue
+			}
 
-func loadCustomAliases() error {
-	fn := filename()
-	if !fsutil.IsFile(fn) {
-		debug.Log("no custom aliases found at %s", fn)
-		return nil
-	}
-	fh, err := os.Open(fn)
-	if err != nil {
-		return err
-	}
-	defer fh.Close()
-	return json.NewDecoder(fh).Decode(&customAliases)
-}
-
-func saveCustomAliases() error {
-	fn := filename()
-	if err := os.MkdirAll(filepath.Dir(fn), 0700); err != nil {
-		return err
-	}
-	fh, err := os.OpenFile(fn, os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		return err
-	}
-	defer fh.Close()
-	return json.NewEncoder(fh).Encode(customAliases)
-}
-
-// AddCustomAlias adds a custom alias
-func AddCustomAlias(domain, alias string) error {
-	if len(customAliases) < 1 {
-		loadCustomAliases()
-	}
-	v := make([]string, 0, 1)
-	if ev, found := customAliases[domain]; found {
-		v = ev
-	}
-	for _, k := range v {
-		if k == alias {
-			return nil
+			customAliases[from] = []string{to}
 		}
 	}
-	v = append(v, alias)
-	sort.Strings(v)
-	customAliases[domain] = v
 
-	return saveCustomAliases()
-}
-
-// RemoveCustomAlias removes a custom alias
-func RemoveCustomAlias(domain, alias string) error {
-	if len(customAliases) < 1 {
-		loadCustomAliases()
-	}
-	ev, found := customAliases[domain]
-	if !found {
-		return nil
-	}
-	nv := make([]string, 0, len(ev)-1)
-	for _, a := range ev {
-		if alias == a {
-			continue
-		}
-		nv = append(nv, a)
-	}
-	customAliases[domain] = nv
-
-	return saveCustomAliases()
-}
-
-// DeleteCustomAlias removes a whole domain
-func DeleteCustomAlias(domain string) error {
-	if len(customAliases) < 1 {
-		loadCustomAliases()
-	}
-	delete(customAliases, domain)
-
-	return saveCustomAliases()
+	return customAliases
 }

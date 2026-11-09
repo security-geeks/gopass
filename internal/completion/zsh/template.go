@@ -13,16 +13,16 @@ _{{ $prog }} () {
 	case "${cmd}" in
 {{- range .Commands }}
 	  {{ .Name }}{{ range .Aliases }}|{{ . }}{{ end }})
-	      {{- if .Subcommands }}
+	      {{- if .Commands }}
 	      local -a subcommands
-	      subcommands=({{ range .Subcommands }}
+	      subcommands=({{ range .Commands }}
 	      "{{ .Name }}:{{ .Usage }}"{{ end }}
 	      )
+	      _describe -t commands "{{ $prog }} {{ .Name }}" subcommands
 	      {{- end }}
 	      {{ if .Flags }}_arguments :{{ range .Flags }} "{{ . | formatFlag }}"{{ end }}{{ end }}
-	      _describe -t commands "{{ $prog }} {{ .Name }}" subcommands
 	      {{ if or (eq .Name "insert") (eq .Name "generate")  (eq .Name "list") }}_{{ $prog }}_complete_folders{{ end }}
-	      {{ if or (eq .Name "copy") (eq .Name "move") (eq .Name "delete") (eq .Name "show") (eq .Name "edit") (eq .Name "insert") (eq .Name "generate") }}_{{ $prog }}_complete_passwords{{ end }}
+	      {{ if or (eq .Name "copy") (eq .Name "move") (eq .Name "delete") (eq .Name "show") (eq .Name "edit") (eq .Name "insert") (eq .Name "generate") (eq .Name "otp") }}_{{ $prog }}_complete_passwords{{ end }}
 	      ;;
 {{- end }}
 	  *)
@@ -49,7 +49,7 @@ _{{ $prog }}_complete_passwords () {
     local IFS=$'\n'
     _arguments : \
 	"--clip[Copy the first line of the secret into the clipboard]"
-    _values 'passwords' $({{ $prog }} ls --flat)
+    _values 'passwords' $({{ $prog }} ls --flat | sed 's/\\/\\\\\\\\/g; s/:/\\\\:/g; s/\[/\\\\[/g; s/\]/\\\\]/g')
 }
 
 _{{ $prog }}_complete_folders () {
@@ -58,4 +58,4 @@ _{{ $prog }}_complete_folders () {
     _describe -t folders "folders" folders -qS /
 }
 
-_{{ $prog }}`
+compdef _{{ $prog }} {{ $prog }}`

@@ -1,16 +1,18 @@
 package out
 
 import (
-	"context"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestPrefix(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
 
-	assert.Equal(t, "", Prefix(ctx))
+	ctx := config.NewContextInMemory()
+
+	assert.Empty(t, Prefix(ctx))
 
 	ctx = AddPrefix(ctx, "[foo] ")
 	assert.Equal(t, "[foo] ", Prefix(ctx))
@@ -23,7 +25,9 @@ func TestPrefix(t *testing.T) {
 }
 
 func TestNewline(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+
+	ctx := config.NewContextInMemory()
 
 	assert.True(t, HasNewline(ctx))
 	assert.False(t, HasNewline(WithNewline(ctx, false)))

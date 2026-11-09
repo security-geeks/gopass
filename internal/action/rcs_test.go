@@ -2,29 +2,28 @@ package action
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"testing"
 
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/tests/gptest"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGit(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithAlwaysYes(ctx, true)
 	ctx = ctxutil.WithInteractive(ctx, false)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
+	ctx = act.cfg.WithConfig(ctx)
 
 	buf := &bytes.Buffer{}
 	out.Stdout = buf
@@ -35,8 +34,8 @@ func TestGit(t *testing.T) {
 	}()
 
 	// git init
-	c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"username": "foobar", "useremail": "foo.bar@example.org"})
-	assert.NoError(t, act.RCSInit(c))
+	c := gptest.CliCtxWithFlags(ctx, t, map[string]string{"name": "foobar", "email": "foo.bar@example.org"})
+	require.NoError(t, act.RCSInit(ctx, c))
 	buf.Reset()
 
 	// getUserData
@@ -45,18 +44,18 @@ func TestGit(t *testing.T) {
 	assert.Equal(t, "0xDEADBEEF", email)
 
 	// GitAddRemote
-	assert.Error(t, act.RCSAddRemote(c))
+	require.Error(t, act.RCSAddRemote(ctx, c))
 	buf.Reset()
 
 	// GitRemoveRemote
-	assert.Error(t, act.RCSRemoveRemote(c))
+	require.Error(t, act.RCSRemoveRemote(ctx, c))
 	buf.Reset()
 
 	// GitPull
-	assert.Error(t, act.RCSPull(c))
+	require.Error(t, act.RCSPull(ctx, c))
 	buf.Reset()
 
 	// GitPush
-	assert.Error(t, act.RCSPush(c))
+	require.NoError(t, act.RCSPush(ctx, c))
 	buf.Reset()
 }

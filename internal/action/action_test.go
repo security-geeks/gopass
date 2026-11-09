@@ -2,40 +2,51 @@ package action
 
 import (
 	"context"
-	"flag"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/blang/semver/v4"
 	"github.com/gopasspw/gopass/internal/backend"
 	"github.com/gopasspw/gopass/internal/backend/crypto/plain"
 	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
 	"github.com/gopasspw/gopass/tests/gptest"
-
-	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
-func newMock(ctx context.Context, u *gptest.Unit) (*Action, error) {
-	cfg := config.Load()
-	cfg.Path = u.StoreDir("")
+func newMock(ctx context.Context, path string) (*Action, error) {
+	cfg := config.NewInMemory()
+	if err := cfg.SetPath(path); err != nil {
+		return nil, err
+	}
+	ctx = cfg.WithConfig(ctx)
 
-	ctx = backend.WithCryptoBackend(ctx, backend.Plain)
+	if !backend.HasCryptoBackend(ctx) {
+		ctx = backend.WithCryptoBackend(ctx, backend.Plain)
+	}
 	ctx = backend.WithStorageBackend(ctx, backend.GitFS)
 	act, err := newAction(cfg, semver.Version{}, false)
 	if err != nil {
 		return nil, err
 	}
 
-	fs := flag.NewFlagSet("default", flag.ContinueOnError)
-	c := cli.NewContext(cli.NewApp(), fs, nil)
-	c.Context = ctx
-	if err := act.IsInitialized(c); err != nil {
-		return nil, err
+	cmd := &cli.Command{
+		ExitErrHandler: func(_ context.Context, _ *cli.Command, _ error) {
+			// suppress os.Exit during testing
+		},
+		Action: func(c context.Context, cmd *cli.Command) error {
+			_, err := act.IsInitialized(c, cmd)
+
+			return err
+		},
+	}
+	if err := cmd.Run(ctx, []string{"test"}); err != nil {
+		// we still return the action since this might be expected sometimes
+		return act, err
 	}
 
 	return act, nil
@@ -43,12 +54,11 @@ func newMock(ctx context.Context, u *gptest.Unit) (*Action, error) {
 
 func TestAction(t *testing.T) {
 	u := gptest.NewUnitTester(t)
-	defer u.Remove()
 
-	ctx := context.Background()
+	ctx := config.NewContextInMemory()
 	ctx = ctxutil.WithInteractive(ctx, false)
 
-	act, err := newMock(ctx, u)
+	act, err := newMock(ctx, u.StoreDir(""))
 	require.NoError(t, err)
 	require.NotNil(t, act)
 
@@ -61,29 +71,27 @@ func TestAction(t *testing.T) {
 	assert.Equal(t, actName, act.Name)
 
 	assert.Contains(t, act.String(), u.StoreDir(""))
-	assert.Equal(t, 0, len(act.Store.Mounts()))
+	assert.Empty(t, act.Store.Mounts())
 }
 
 func TestNew(t *testing.T) {
-	td, err := os.MkdirTemp("", "gopass-")
-	require.NoError(t, err)
-	defer func() {
-		_ = os.RemoveAll(td)
-	}()
+	u := gptest.NewUnitTester(t)
+	assert.NotNil(t, u)
 
-	cfg := config.New()
+	td := t.TempDir()
+	cfg := config.NewInMemory()
 	sv := semver.Version{}
 
 	t.Run("init a new store", func(t *testing.T) {
-		_, err = New(cfg, sv)
+		_, err := New(cfg, sv)
 		require.NoError(t, err)
 	})
 
 	t.Run("init an existing plain store", func(t *testing.T) {
-		cfg.Path = filepath.Join(td, "store")
-		assert.NoError(t, os.MkdirAll(cfg.Path, 0700))
-		assert.NoError(t, os.WriteFile(filepath.Join(cfg.Path, plain.IDFile), []byte("foobar"), 0600))
-		_, err = New(cfg, sv)
-		assert.NoError(t, err)
+		require.NoError(t, cfg.SetPath(filepath.Join(td, "store")))
+		require.NoError(t, os.MkdirAll(cfg.Path(), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(cfg.Path(), plain.IDFile), []byte("foobar"), 0o600))
+		_, err := New(cfg, sv)
+		require.NoError(t, err)
 	})
 }

@@ -6,12 +6,15 @@ import (
 	"html/template"
 	"strings"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
+
+// ErrUnknownType is returned when an unknown type is encountered.
+var ErrUnknownType = fmt.Errorf("unknown type")
 
 func longName(name string) string {
 	// "If s does not contain sep and sep is not empty, Split returns a slice of length 1 whose only element is s."
-	// from https://golang.org/pkg/strings/#Split
+	// from https://golang.org/pkg/strings/#Split.
 	return strings.TrimSpace(strings.Split(name, ",")[0])
 }
 
@@ -20,7 +23,20 @@ func shortName(name string) string {
 	if len(parts) < 2 {
 		return ""
 	}
+
 	return strings.TrimSpace(parts[1])
+}
+
+func escapePasswordName(name string) string {
+	// Escape special characters for fish completions.
+	// In fish, we use single quotes in the complete command, so we need to handle single quotes.
+	// We also escape backslashes to be safe.
+	name = strings.ReplaceAll(name, "\\", "\\\\")
+	// Single quotes need to be escaped by ending the single-quoted string, adding an escaped single quote, and starting a new single-quoted string
+	// E.g. 'hello'world' becomes 'hello'\''world'
+	name = strings.ReplaceAll(name, "'", "'\\''")
+
+	return name
 }
 
 func formatFlag(name, usage, typ string) string {
@@ -62,25 +78,29 @@ func formatFlagFunc(typ string) func(cli.Flag) (string, error) {
 		case *cli.UintFlag:
 			return formatFlag(ft.Name, ft.Usage, typ), nil
 		default:
-			return "", fmt.Errorf("unknown type: '%T'", f)
+			return "", fmt.Errorf("error '%T': %w", f, ErrUnknownType)
 		}
 	}
 }
 
-// GetCompletion returns a fish completion script
-func GetCompletion(a *cli.App) (string, error) {
+// GetCompletion returns a fish completion script.
+func GetCompletion(a *cli.Command) (string, error) {
 	tplFuncs := template.FuncMap{
-		"formatShortFlag": formatFlagFunc("short"),
-		"formatLongFlag":  formatFlagFunc("long"),
-		"formatFlagUsage": formatFlagFunc("usage"),
+		"formatShortFlag":    formatFlagFunc("short"),
+		"formatLongFlag":     formatFlagFunc("long"),
+		"formatFlagUsage":    formatFlagFunc("usage"),
+		"escapePasswordName": escapePasswordName,
 	}
+
 	tpl, err := template.New("fish").Funcs(tplFuncs).Parse(fishTemplate)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
+
 	buf := &bytes.Buffer{}
 	if err := tpl.Execute(buf, a); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
+
 	return buf.String(), nil
 }

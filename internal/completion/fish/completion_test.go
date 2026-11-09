@@ -1,12 +1,11 @@
 package fish
 
 import (
-	"flag"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 type unknownFlag struct{}
@@ -15,7 +14,19 @@ func (u *unknownFlag) String() string {
 	return ""
 }
 
-func (u *unknownFlag) Apply(*flag.FlagSet) error {
+func (u *unknownFlag) Get() any {
+	return nil
+}
+
+func (u *unknownFlag) PreParse() error {
+	return nil
+}
+
+func (u *unknownFlag) PostParse() error {
+	return nil
+}
+
+func (u *unknownFlag) Set(string, string) error {
 	return nil
 }
 
@@ -32,6 +43,8 @@ func (u *unknownFlag) Names() []string {
 }
 
 func TestFormatFlag(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		Name  string
 		Usage string
@@ -45,28 +58,35 @@ func TestFormatFlag(t *testing.T) {
 		{"", "Print", "long", ""},
 		{"print, p", "Print", "foo", ""},
 	} {
-		assert.Equal(t, tc.Out, formatFlag(tc.Name, tc.Usage, tc.Typ))
+		t.Run(tc.Name, func(t *testing.T) {
+			assert.Equal(t, tc.Out, formatFlag(tc.Name, tc.Usage, tc.Typ))
+			t.Parallel()
+		})
 	}
 }
 
 func TestGetCompletion(t *testing.T) {
-	app := cli.NewApp()
+	t.Parallel()
+
+	app := &cli.Command{}
 	sv, err := GetCompletion(app)
 	require.NoError(t, err)
 	assert.Contains(t, sv, "#!/usr/bin/env fish")
 
 	fishTemplate = "{{.unexported}}"
 	sv, err = GetCompletion(app)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, sv, "")
 
 	fishTemplate = "{{}}"
 	sv, err = GetCompletion(app)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, sv, "")
 }
 
 func TestFormatflagFunc(t *testing.T) {
+	t.Parallel()
+
 	for _, flag := range []cli.Flag{
 		&cli.BoolFlag{Name: "foo", Usage: "bar"},
 		&cli.Float64Flag{Name: "foo", Usage: "bar"},
@@ -82,7 +102,7 @@ func TestFormatflagFunc(t *testing.T) {
 	} {
 		sv, err := formatFlagFunc("short")(flag)
 		require.NoError(t, err)
-		assert.Equal(t, "", sv)
+		assert.Empty(t, sv)
 
 		sv, err = formatFlagFunc("long")(flag)
 		require.NoError(t, err)
@@ -94,14 +114,14 @@ func TestFormatflagFunc(t *testing.T) {
 	}
 
 	sv, err := formatFlagFunc("short")(&unknownFlag{})
-	assert.Error(t, err)
-	assert.Equal(t, "", sv)
+	require.Error(t, err)
+	assert.Empty(t, sv)
 
 	sv, err = formatFlagFunc("long")(&unknownFlag{})
-	assert.Error(t, err)
-	assert.Equal(t, "", sv)
+	require.Error(t, err)
+	assert.Empty(t, sv)
 
 	sv, err = formatFlagFunc("usage")(&unknownFlag{})
-	assert.Error(t, err)
-	assert.Equal(t, "", sv)
+	require.Error(t, err)
+	assert.Empty(t, sv)
 }

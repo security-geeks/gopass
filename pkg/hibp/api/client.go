@@ -1,4 +1,8 @@
 // Package api implements an HIBP API client.
+//
+// Stability: best-effort stable. It is consumed by internal/audit and by the
+// standalone gopass-hibp integration. Changes to its exported API follow the
+// policy in docs/adr/A-12-pkg-api-stability.md.
 package api
 
 import (
@@ -9,14 +13,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cenkalti/backoff"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/gopasspw/gopass/pkg/debug"
 )
 
-// URL is the HIBPv2 API URL
+// URL is the HIBPv2 API URL.
 var URL = "https://api.pwnedpasswords.com"
 
-// Lookup performs a lookup against the HIBP v2 API
+// Lookup performs a lookup against the HIBP v2 API.
 func Lookup(shaSum string) (uint64, error) {
 	if len(shaSum) != 40 {
 		return 0, fmt.Errorf("invalid shasum")
@@ -52,6 +56,7 @@ func Lookup(shaSum string) (uint64, error) {
 			return fmt.Errorf("HTTP request failed: %s %s", resp.Status, body)
 		}
 
+		debug.Log("Body: %s", string(body))
 		for _, line := range strings.Split(string(body), "\n") {
 			line = strings.TrimSpace(line)
 			if len(line) < 37 {
@@ -62,9 +67,11 @@ func Lookup(shaSum string) (uint64, error) {
 			}
 			if iv, err := strconv.ParseUint(line[36:], 10, 64); err == nil {
 				count = iv
+
 				return nil
 			}
 		}
+
 		return nil
 	}
 
@@ -72,5 +79,6 @@ func Lookup(shaSum string) (uint64, error) {
 	bo.MaxElapsedTime = 10 * time.Second
 
 	err := backoff.Retry(op, bo)
+
 	return count, err
 }

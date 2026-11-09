@@ -3,8 +3,17 @@
 // dumps ordered by prevalence, too. But processing those will take much, much
 // longer.
 //
-// Unfortunately these dumps need to be unpacked before use, since there is no
-// 7z implementation for Go at the time of this writing.
+// The HIBP dumps are not available for download anymore. This package is kept
+// for users that still have local dumps around (possibly manually curated).
+// Consider using the "download" command and the online API instead.
+//
+// Unfortunately these dumps need to be unpacked before use. Only plain text
+// and gzip compressed dumps are supported. Use 7z to extract the dumps and
+// (re-)compress them with gzip if necessary.
+//
+// Stability: best-effort stable. It is consumed by internal/audit and by the
+// standalone gopass-hibp integration. Changes to its exported API follow the
+// policy in docs/adr/A-12-pkg-api-stability.md.
 package dump
 
 import (
@@ -18,12 +27,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gopasspw/gopass/internal/out"
 	"github.com/gopasspw/gopass/pkg/debug"
 	"github.com/gopasspw/gopass/pkg/fsutil"
 )
 
-// Scanner is a HIBP dump scanner
+// Scanner is a HIBP dump scanner.
 type Scanner struct {
 	dumps []string
 }
@@ -41,13 +49,14 @@ func New(dumps ...string) (*Scanner, error) {
 	if len(ok) < 1 {
 		return nil, fmt.Errorf("no valid dumps given")
 	}
+
 	return &Scanner{
 		dumps: ok,
 	}, nil
 }
 
 // LookupBatch takes a slice SHA1 hashes and matches them against
-// the provided dumps
+// the provided dumps.
 func (s *Scanner) LookupBatch(ctx context.Context, in []string) []string {
 	if len(in) < 1 {
 		return nil
@@ -65,12 +74,14 @@ func (s *Scanner) LookupBatch(ctx context.Context, in []string) []string {
 	for _, fn := range s.dumps {
 		go s.scanFile(ctx, fn, in, results, done)
 	}
+
 	go func() {
 		for result := range results {
 			out = append(out, result)
 		}
 		done <- struct{}{}
 	}()
+
 	for range s.dumps {
 		<-done
 	}
@@ -88,33 +99,56 @@ func (s *Scanner) scanFile(ctx context.Context, fn string, in []string, results 
 	if isSorted(fn) {
 		debug.Log("file %s appears to be sorted", fn)
 		s.scanSortedFile(ctx, fn, in, results)
+
 		return
 	}
 	debug.Log("file %s is not sorted", fn)
 	s.scanUnsortedFile(ctx, fn, in, results)
 }
 
-func isSorted(fn string) bool {
-	var rdr io.Reader
+// open opens the given dump file for reading. gzip compressed dumps are
+// transparently decompressed.
+func open(fn string) (io.ReadCloser, error) {
 	fh, err := os.Open(fn)
+	if err != nil {
+		return nil, err
+	}
+
+	if !strings.HasSuffix(fn, ".gz") {
+		return fh, nil
+	}
+
+	gzr, err := gzip.NewReader(fh)
+	if err != nil {
+		_ = fh.Close()
+
+		return nil, err
+	}
+
+	return &readCloser{Reader: gzr, closers: []io.Closer{gzr, fh}}, nil
+}
+
+type readCloser struct {
+	io.Reader
+	closers []io.Closer
+}
+
+func (rc *readCloser) Close() error {
+	for _, c := range rc.closers {
+		_ = c.Close()
+	}
+
+	return nil
+}
+
+func isSorted(fn string) bool {
+	rdr, err := open(fn)
 	if err != nil {
 		return false
 	}
 	defer func() {
-		_ = fh.Close()
+		_ = rdr.Close()
 	}()
-	rdr = fh
-
-	if strings.HasSuffix(fn, ".gz") {
-		gzr, err := gzip.NewReader(fh)
-		if err != nil {
-			return false
-		}
-		defer func() {
-			_ = gzr.Close()
-		}()
-		rdr = gzr
-	}
 
 	lineNo := 0
 	lastLine := ""
@@ -134,32 +168,24 @@ func isSorted(fn string) bool {
 		}
 		lastLine = line
 	}
+
+	if scanner.Err() != nil {
+		fmt.Printf("Failed to scan file %s: %s", fn, scanner.Err())
+	}
+
 	return true
 }
 
 func (s *Scanner) scanSortedFile(ctx context.Context, fn string, in []string, results chan string) {
-	var rdr io.Reader
-	fh, err := os.Open(fn)
+	rdr, err := open(fn)
 	if err != nil {
-		out.Errorf(ctx, "Failed to open file %s: %s", fn, err)
+		fmt.Printf("Failed to open file %s: %s", fn, err)
+
 		return
 	}
 	defer func() {
-		_ = fh.Close()
+		_ = rdr.Close()
 	}()
-	rdr = fh
-
-	if strings.HasSuffix(fn, ".gz") {
-		gzr, err := gzip.NewReader(fh)
-		if err != nil {
-			out.Errorf(ctx, "Failed to open the file %s: %s", fn, err)
-			return
-		}
-		defer func() {
-			_ = gzr.Close()
-		}()
-		rdr = gzr
-	}
 
 	debug.Log("Checking file %s ...\n", fn)
 
@@ -178,6 +204,12 @@ SCAN:
 		}
 
 		lineNo++
+		if in == nil {
+			results <- strings.TrimSpace(scanner.Text())
+
+			continue
+		}
+
 		if i >= len(in) {
 			break
 		}
@@ -191,6 +223,7 @@ SCAN:
 			numMatches++
 			// advance to next sha sum from store and next line in file
 			i++
+
 			continue
 		}
 		// advance in sha sums from store until we've reached the position in
@@ -200,37 +233,28 @@ SCAN:
 		}
 	}
 
+	if scanner.Err() != nil {
+		fmt.Printf("Failed to scan file %s: %s", fn, scanner.Err())
+	}
+
 	debug.Log("Finished checking file %s", fn)
 }
 
 func (s *Scanner) scanUnsortedFile(ctx context.Context, fn string, in []string, results chan string) {
-	var rdr io.Reader
-	fh, err := os.Open(fn)
+	rdr, err := open(fn)
 	if err != nil {
-		out.Errorf(ctx, "Failed to open file %s: %s", fn, err)
+		fmt.Printf("Failed to open file %s: %s", fn, err)
+
 		return
 	}
 	defer func() {
-		_ = fh.Close()
+		_ = rdr.Close()
 	}()
-	rdr = fh
-
-	if strings.HasSuffix(fn, ".gz") {
-		gzr, err := gzip.NewReader(fh)
-		if err != nil {
-			out.Errorf(ctx, "Failed to open the file %s: %s", fn, err)
-			return
-		}
-		defer func() {
-			_ = gzr.Close()
-		}()
-		rdr = gzr
-	}
 
 	lines := make(chan string, 1024)
 	worker := runtime.NumCPU()
 	done := make(chan struct{}, worker)
-	for i := 0; i < worker; i++ {
+	for i := range worker {
 		debug.Log("[%d] Starting matcher ...", i)
 		go s.matcher(ctx, in, lines, results, done)
 	}
@@ -250,8 +274,12 @@ SCAN:
 	}
 	close(lines)
 
-	for i := 0; i < worker; i++ {
+	for range worker {
 		<-done
+	}
+
+	if scanner.Err() != nil {
+		fmt.Printf("Failed to scan file %s: %s", fn, scanner.Err())
 	}
 
 	debug.Log("Finished checking file %s", fn)
@@ -276,6 +304,7 @@ LINE:
 		for _, candidate := range in {
 			if candidate == hash {
 				results <- hash
+
 				continue LINE
 			}
 		}

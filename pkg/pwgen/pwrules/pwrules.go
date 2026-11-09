@@ -1,9 +1,9 @@
 package pwrules
 
 import (
-	"math"
+	"context"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -12,48 +12,32 @@ import (
 
 //go:generate go run gen.go
 
-var (
-	rules   = map[string]Rule{}
-	reChars = regexp.MustCompile(`(allowed|required):\s*\[(.*)\](?:;|,)`)
-)
+var reChars = regexp.MustCompile(`(allowed|required):\s*\[(.*)\](?:;|,)`)
 
-func init() {
-	for k, v := range genRules {
-		// do not override customizations
-		if _, found := rules[k]; found {
-			continue
-		}
-		r := ParseRule(v)
-		r.Exact = genRulesExact[k]
-		if r.Maxlen < 1 {
-			r.Maxlen = math.MaxInt32
-		}
-		rules[k] = r
-		debug.Log("added rule for %q from %q: %+v", k, v, r)
-	}
-}
-
-// AllRules returns all rules
+// AllRules returns all password rules.
 func AllRules() map[string]Rule {
-	return rules
+	return genRules
 }
 
-// LookupRule looks up a rule either directly or through one of it's know
+// LookupRule looks up a rule either directly or through one of its known
 // aliases.
-func LookupRule(domain string) (Rule, bool) {
-	r, found := rules[domain]
+func LookupRule(ctx context.Context, domain string) (Rule, bool) {
+	r, found := genRules[domain]
 	if found {
 		return r, true
 	}
-	for _, alias := range LookupAliases(domain) {
-		if r, found := rules[alias]; found {
+
+	for _, alias := range LookupAliases(ctx, domain) {
+		if r, found := genRules[alias]; found {
 			return r, true
 		}
 	}
+
 	return Rule{}, false
 }
 
-// Rule is a password rule as defined by Apple at https://developer.apple.com/password-rules/
+// Rule is a password rule as defined by Apple.
+// See: https://developer.apple.com/password-rules/
 type Rule struct {
 	Minlen    int
 	Maxlen    int
@@ -67,10 +51,12 @@ type Rule struct {
 // NOTE: This is not a complete parser.
 func ParseRule(in string) Rule {
 	r := Rule{}
+
 	if reChars.MatchString(in) {
 		m := reChars.FindStringSubmatch(in)
 		if len(m) > 2 {
 			re := "[" + m[2] + "]"
+
 			switch m[1] {
 			case "required":
 				r.Required = append(r.Required, re)
@@ -79,18 +65,23 @@ func ParseRule(in string) Rule {
 			}
 		}
 	}
-	for _, part := range strings.Split(strings.TrimSuffix(in, ";"), ";") {
+
+	for part := range strings.SplitSeq(strings.TrimSuffix(in, ";"), ";") {
 		p := strings.Split(part, ": ")
 		if len(p) < 2 {
 			continue
 		}
+
 		var err error
+
 		key := strings.TrimSpace(p[0])
 		strVal := strings.TrimSpace(p[1])
-		max := len(strVal)
+		maxVal := len(strVal)
+
 		if i := strings.Index(strVal, "["); i > 0 {
-			max = i
+			maxVal = i
 		}
+
 		switch key {
 		case "minlength":
 			r.Minlen, err = strconv.Atoi(strVal)
@@ -99,28 +90,35 @@ func ParseRule(in string) Rule {
 		case "max-consecutive":
 			r.Maxconsec, err = strconv.Atoi(strVal)
 		case "required":
-			r.Required = append(r.Required, strings.Split(strVal[0:max], ",")...)
+			r.Required = append(r.Required, strings.Split(strVal[0:maxVal], ",")...)
 		case "allowed":
-			r.Allowed = append(r.Allowed, strings.Split(strVal[0:max], ",")...)
+			r.Allowed = append(r.Allowed, strings.Split(strVal[0:maxVal], ",")...)
 		}
+
 		if err != nil {
 			debug.Log("failed to parse %s for %s: %s", strVal, key, err)
 		}
 	}
+
 	r.Required = sanitize(r.Required)
 	r.Allowed = sanitize(r.Allowed)
+
 	return r
 }
 
 func sanitize(in []string) []string {
 	out := make([]string, 0, len(in))
+
 	for _, v := range in {
 		v := strings.TrimSpace(v)
 		if strings.HasPrefix(v, "[") && !strings.HasSuffix(v, "]") {
 			continue
 		}
+
 		out = append(out, v)
 	}
-	sort.Strings(out)
+
+	slices.Sort(out)
+
 	return out
 }

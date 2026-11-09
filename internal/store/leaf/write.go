@@ -2,11 +2,9 @@ package leaf
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 
-	"github.com/gopasspw/gopass/internal/out"
+	"github.com/gopasspw/gopass/internal/config"
 	"github.com/gopasspw/gopass/internal/queue"
 	"github.com/gopasspw/gopass/internal/store"
 	"github.com/gopasspw/gopass/pkg/ctxutil"
@@ -14,13 +12,17 @@ import (
 	"github.com/gopasspw/gopass/pkg/gopass"
 )
 
-// Set encodes and writes the cipertext of one entry to disk
+// Set encodes and writes the ciphertext of one entry to disk.
 func (s *Store) Set(ctx context.Context, name string, sec gopass.Byter) error {
-	if strings.Contains(name, "//") {
-		return fmt.Errorf("invalid secret name: %s", name)
+	if err := store.ValidateSecretName(name); err != nil {
+		return err
 	}
 
-	p := s.passfile(name)
+	if cfg, _ := config.FromContext(ctx); cfg.GetM(s.alias, "core.readonly") == "true" {
+		return fmt.Errorf("writing to %s is disabled by `core.readonly`", s.alias)
+	}
+
+	p := s.passfile(ctx, name)
 
 	recipients, err := s.useableKeys(ctx, name)
 	if err != nil {
@@ -30,9 +32,15 @@ func (s *Store) Set(ctx context.Context, name string, sec gopass.Byter) error {
 	// make sure the encryptor can decrypt later
 	recipients = s.ensureOurKeyID(ctx, recipients)
 
+	// we cannot encrypt without recipients
+	if len(recipients) < 1 {
+		return fmt.Errorf("no useable recipients for %q. cannot encrypt without recipients", name)
+	}
+
 	ciphertext, err := s.crypto.Encrypt(ctx, sec.Bytes(), recipients)
 	if err != nil {
 		debug.Log("Failed encrypt secret: %s", err)
+
 		return store.ErrEncrypt
 	}
 
@@ -45,13 +53,11 @@ func (s *Store) Set(ctx context.Context, name string, sec gopass.Byter) error {
 	// at the end of the batch processing.
 	if IsNoGitOps(ctx) {
 		debug.Log("sub.Set(%s) - skipping git ops (disabled)")
+
 		return nil
 	}
 
-	if err := s.storage.Add(ctx, p); err != nil {
-		if errors.Is(err, store.ErrGitNotInit) {
-			return nil
-		}
+	if err := s.storage.TryAdd(ctx, p); err != nil {
 		return fmt.Errorf("failed to add %q to git: %w", p, err)
 	}
 
@@ -61,40 +67,40 @@ func (s *Store) Set(ctx context.Context, name string, sec gopass.Byter) error {
 
 	// try to enqueue this task, if the queue is not available
 	// it will return the task and we will execute it inline
-	t := queue.GetQueue(ctx).Add(func(ctx context.Context) error {
-		return s.gitCommitAndPush(ctx, name)
+	commitCtx := ctx
+	t := queue.GetQueue(ctx).Add(func(_ context.Context) (context.Context, error) {
+		return nil, s.gitCommitAndPush(commitCtx, name)
 	})
-	return t(ctx)
+
+	_, err = t(ctx)
+
+	return err
 }
 
 func (s *Store) gitCommitAndPush(ctx context.Context, name string) error {
-	if err := s.storage.Commit(ctx, fmt.Sprintf("Save secret to %s: %s", name, ctxutil.GetCommitMessage(ctx))); err != nil {
-		switch {
-		case errors.Is(err, store.ErrGitNotInit):
-			debug.Log("commitAndPush - skipping git commit - git not initialized")
-		case errors.Is(err, store.ErrGitNothingToCommit):
-			debug.Log("commitAndPush - skipping git commit - nothing to commit")
-		default:
-			return fmt.Errorf("failed to commit changes to git: %w", err)
-		}
+	commitMessage := ctxutil.GetCommitMessage(ctx)
+	message := fmt.Sprintf("Save secret %s: %s", name, commitMessage)
+	if commitMessage == "" {
+		message = fmt.Sprintf("Save secret: %s", name)
+	}
+	if err := s.storage.TryCommit(ctx, message); err != nil {
+		return fmt.Errorf("failed to commit changes to git: %w", err)
 	}
 
-	debug.Log("syncing with remote ...")
-	if err := s.storage.Push(ctx, "", ""); err != nil {
-		if errors.Is(err, store.ErrGitNotInit) {
-			msg := "Warning: git is not initialized for this.storage. Ignoring auto-push option\n" +
-				"Run: gopass git init"
-			out.Errorf(ctx, msg)
-			return nil
-		}
-		if errors.Is(err, store.ErrGitNoRemote) {
-			msg := "Warning: git has no remote. Ignoring auto-push option\n" +
-				"Run: gopass git remote add origin ..."
-			debug.Log(msg)
-			return nil
-		}
+	ctx = config.WithMount(ctx, s.alias)
+	if !config.Bool(ctx, "core.autopush") {
+		debug.Log("not pushing to git remote, core.autopush is false")
+
+		return nil
+	}
+
+	debug.Log("pushing to remote ...")
+
+	if err := s.storage.TryPush(ctx, "", ""); err != nil {
 		return fmt.Errorf("failed to push to git remote: %w", err)
 	}
-	debug.Log("synced with remote")
+
+	debug.Log("pushed to remote")
+
 	return nil
 }
